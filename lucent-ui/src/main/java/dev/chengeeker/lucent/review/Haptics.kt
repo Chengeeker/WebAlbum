@@ -13,6 +13,12 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 
+/** All application haptics go through this opt-in, style-aware policy.
+ * TAP: buttons and menu items; SELECTION: each newly crossed thumbnail;
+ * LONG_PRESS: immediately when a long-press gesture is recognized, not on release.
+ */
+enum class ReviewHapticKind { TAP, SELECTION, LONG_PRESS }
+
 object SilentComposeHaptics : HapticFeedback {
     override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) = Unit
 }
@@ -20,13 +26,26 @@ object SilentComposeHaptics : HapticFeedback {
 val LocalReviewHapticsEnabled = staticCompositionLocalOf<() -> Boolean> { { false } }
 
 @Composable
-fun reviewPulse(): () -> Unit {
+fun reviewHaptic(kind: ReviewHapticKind = ReviewHapticKind.TAP): () -> Unit {
     val view = LocalView.current
     val enabled = LocalReviewHapticsEnabled.current
-    return remember(view, enabled) {
-        { if (enabled()) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
+    return remember(view, enabled, kind) {
+        {
+            if (enabled()) {
+                val constant = when (kind) {
+                    ReviewHapticKind.TAP -> HapticFeedbackConstants.KEYBOARD_TAP
+                    ReviewHapticKind.SELECTION -> HapticFeedbackConstants.CLOCK_TICK
+                    ReviewHapticKind.LONG_PRESS -> HapticFeedbackConstants.LONG_PRESS
+                }
+                view.performHapticFeedback(constant, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+            }
+        }
     }
 }
+
+/** Compatible alias used by gallery thumbnails and other Lucent controls. */
+@Composable
+fun reviewPulse(): () -> Unit = reviewHaptic()
 
 @Composable
 fun hapticClick(action: () -> Unit): () -> Unit {

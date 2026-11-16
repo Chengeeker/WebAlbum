@@ -2,7 +2,7 @@
 
 WebAlbum is an Android gallery for browsing photos and videos stored on a WebDAV server. It includes folder browsing, image and video playback, Live Photo support, configurable layouts, caching, and optional app locking.
 
-The app uses the in-repository `lucent-ui` Compose module. The Android application ID is `com.webdav.album`; the current source version is 1.2.2 (version code 8).
+The app uses the in-repository `lucent-ui` Compose module. The Android application ID is `com.webdav.album`; the current source version is 1.2.4 (version code 10).
 
 ## Build
 

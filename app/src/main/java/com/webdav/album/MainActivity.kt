@@ -9,10 +9,14 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,6 +32,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.LayoutDirection
@@ -41,6 +47,9 @@ import dev.chengeeker.lucent.review.PageStack
 import dev.chengeeker.lucent.review.ReviewGallery
 import dev.chengeeker.lucent.review.ReviewRoute
 import dev.chengeeker.lucent.review.ReviewBottomBar
+import dev.chengeeker.lucent.review.ReviewHapticKind
+import dev.chengeeker.lucent.review.reviewHaptic
+import dev.chengeeker.lucent.review.hapticClick
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -67,6 +76,8 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
     var saving by remember { mutableStateOf(false) }
     var selecting by remember { mutableStateOf(false) }
     val selected = remember { mutableStateListOf<String>() }
+    var rangeOriginal by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var captureTimes by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
     var properties by remember { mutableStateOf<List<DavItem>?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
     val routes = remember { mutableStateListOf(ReviewRoute(0, "root")) }
@@ -81,7 +92,27 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
     val videoFactory = remember(app) { androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okhttp3.Call.Factory { app.client.newCall(it) }) }
     val motionDetector = remember(context) { MotionPhotoDetector(context) }
     val resolveMotion: suspend (GalleryMedia) -> String? = remember(motionDetector) { { motionDetector.find(it) } }
-    LaunchedEffect(folders) { selecting = false; selected.clear() }
+    LaunchedEffect(folders) { selecting = false; selected.clear(); captureTimes = emptyMap() }
+    LaunchedEffect(connection, entries, prefs.sortMode) {
+        val current = connection
+        if (current == null || prefs.sortMode != AlbumSort.CAPTURE) return@LaunchedEffect
+        captureTimes = withContext(Dispatchers.IO) {
+            val cache = Coil.imageLoader(context).diskCache
+            entries.asSequence().filter { it.image }.mapNotNull { item ->
+                runCatching {
+                    cache?.openSnapshot(item.imageUrl(current))?.use { snapshot ->
+                        val exif = android.media.ExifInterface(snapshot.data.toFile().absolutePath)
+                        val raw = exif.getAttribute(android.media.ExifInterface.TAG_DATETIME_ORIGINAL)
+                            ?: exif.getAttribute(android.media.ExifInterface.TAG_DATETIME)
+                        raw?.let {
+                            val format = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US).apply { isLenient = false }
+                            format.parse(it)?.time?.let { timestamp -> item.url to timestamp }
+                        }
+                    }
+                }.getOrNull()
+            }.toMap()
+        }
+    }
     fun download(items: List<DavItem>) {
         if (saving || items.isEmpty()) return
         val tree = prefs.downloadTree
@@ -205,11 +236,23 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                             if (connection == next) load(home(next), fallback = true)
                         }
                     }
-                    else BrowsePage(config, folders, snapshots, prefs.columns, prefs.folderColumns, loading, folderError, selecting, selected,
+                    else BrowsePage(config, folders, snapshots, prefs.columns, prefs.folderColumns, prefs.sortMode, prefs.sortDescending, captureTimes, loading, folderError, selecting, selected,
                         onBack = { load(folders.dropLast(1)) }, onFolder = { load(folders + it.url) },
                         onRefresh = { cancelPrefetch(); folderCache.clear(); load(folders, force = true) }, onSettings = { open("settings") },
                         onSelection = { item -> selecting = true; if (item.url in selected) selected.remove(item.url) else selected.add(item.url) },
                         onSelectMode = { selecting = !selecting; selected.clear() },
+                        onColumnsChange = { prefs.updateColumns(it) },
+                        onSortChange = { prefs.updateSort(it) },
+                        onRangeSelection = { start, end, fresh ->
+                            if (!loading) {
+                                if (fresh) rangeOriginal = selected.toSet()
+                                val ordered = orderedMedia(entries.filter { it.image || it.video }, prefs.sortMode, prefs.sortDescending, captureTimes)
+                                val updated = rangeSelection(rangeOriginal, ordered, start, end)
+                                selecting = true
+                                selected.clear()
+                                selected.addAll(updated)
+                            }
+                        },
                         onSelectAll = { selected.clear(); selected.addAll(entries.filter { it.image || it.video }.map { it.url }) },
                         onAction = { action ->
                             val items = entries.filter { it.url in selected }
@@ -261,7 +304,6 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                 }
             }
         }
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter).statusBarsPadding().padding(top = 56.dp))
     gallery?.takeIf { !locked }?.let { (media, index) ->
             CompositionLocalProvider(LocalVideoDataSource provides videoFactory) {
                 ReviewGallery(media, index, origins, onClose = { gallery = null }, saving = saving, resolveMotion = resolveMotion, onSave = { item ->
@@ -295,11 +337,11 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                 Text("格式：${item.name.substringAfterLast('.', "未知").uppercase()}\n大小：${size?.let { "${it} 字节" } ?: "未知"}\n修改时间：${parts.getOrNull(1)?.ifBlank { "未知" } ?: "未知"}" +
                     if (items.size == 1 && item.image) "\n图片尺寸：${dimensions ?: "未缓存或无法读取"}" else "", style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(10.dp))
-            } } }, confirmButton = { TextButton(onClick = { properties = null }) { Text("关闭") } })
+            } } }, confirmButton = { TextButton(onClick = hapticClick { properties = null }) { Text("关闭") } })
     }
     if (confirmDelete && !locked) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("删除服务器文件？") },
         text = { Text("将从 WebDAV 服务器永久删除选中的 ${selected.size} 个文件，此操作无法撤销。") },
-        confirmButton = { TextButton(onClick = {
+        confirmButton = { TextButton(onClick = hapticClick {
             confirmDelete = false
             val config = connection
             val items = entries.filter { it.url in selected }
@@ -315,40 +357,150 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                 selected.removeAll(deleted); loading = false
                 message = "已确认删除 ${deleted.size} 个文件，${items.size - deleted.size} 个失败或状态未确认。请刷新目录核对。"
             }
-        }) { Text("删除") } }, dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("取消") } })
+        }) { Text("删除") } }, dismissButton = { TextButton(onClick = hapticClick { confirmDelete = false }) { Text("取消") } })
 }
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map<String, List<DavItem>>, columns: Int, folderColumns: Int,
-    loading: Boolean, folderError: String?, selecting: Boolean, selected: List<String>, onBack: () -> Unit, onFolder: (DavItem) -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit,
+    sortMode: AlbumSort, sortDescending: Boolean, captureTimes: Map<String, Long>, loading: Boolean, folderError: String?, selecting: Boolean, selected: List<String>, onBack: () -> Unit, onFolder: (DavItem) -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit,
     onSelection: (DavItem) -> Unit, onSelectMode: () -> Unit, onSelectAll: () -> Unit, onAction: (Int) -> Unit,
+    onColumnsChange: (Int) -> Unit, onSortChange: (AlbumSort) -> Unit, onRangeSelection: (Int, Int, Boolean) -> Unit,
     onGallery: (List<GalleryMedia>, Int, Map<Int, GalleryOrigin>) -> Unit) {
     val direction = if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1 else 1
     val motion = LocalLucentStyle.current.motion
     AnimatedContent(targetState = folders, transitionSpec = {
         if (!motion) EnterTransition.None togetherWith ExitTransition.None
         else if (targetState.size > initialState.size)
-            slideInHorizontally(tween(320, easing = CubicBezierEasing(.215f, .61f, .355f, 1f))) { it * direction } togetherWith ExitTransition.None
-        else EnterTransition.None togetherWith slideOutHorizontally(tween(220, easing = CubicBezierEasing(.55f, .055f, .675f, .19f))) { it * direction }
+            (slideInHorizontally(tween(320, easing = CubicBezierEasing(.215f, .61f, .355f, 1f))) { it * direction } + fadeIn(tween(260))) togetherWith
+                (slideOutHorizontally(tween(220, easing = CubicBezierEasing(.55f, .055f, .675f, .19f))) { -it / 6 * direction } + fadeOut(tween(220)))
+        else
+            (slideInHorizontally(tween(280, easing = CubicBezierEasing(.215f, .61f, .355f, 1f))) { -it / 6 * direction } + fadeIn(tween(220))) togetherWith
+                (slideOutHorizontally(tween(260, easing = CubicBezierEasing(.55f, .055f, .675f, .19f))) { it * direction } + fadeOut(tween(220)))
     }, label = "folder-transition") { path ->
         val list = snapshots[path.lastOrNull().orEmpty()].orEmpty()
         val folderItems = remember(list) { list.filter { it.directory } }
-        val mediaItems = remember(list) { list.filter { it.image || it.video } }
+        val mediaItems = remember(list, sortMode, sortDescending, captureTimes) {
+            orderedMedia(list.filter { it.image || it.video }, sortMode, sortDescending, captureTimes)
+        }
         val photos = remember(mediaItems, config) { GalleryItems(mediaItems, config) }
         val sourceMap = remember(photos) { mutableMapOf<Int, GalleryOrigin>() }
+        val gridState = rememberLazyGridState()
+        val scope = rememberCoroutineScope()
+        var moreOpen by remember { mutableStateOf(false) }
+        var columnsOpen by remember { mutableStateOf(false) }
+        var sortOpen by remember { mutableStateOf(false) }
+        val pressTick = reviewHaptic(ReviewHapticKind.LONG_PRESS)
+        val selectionTick = reviewHaptic(ReviewHapticKind.SELECTION)
+        val titleTick = reviewHaptic()
         BackdropHost(overlay = {
             LucentHeader(if (selecting) "已选择 ${selected.size} 项" else if (path.isEmpty()) "WebAlbum" else folderName(path.last()),
                 onBack = if (path.isNotEmpty()) onBack else null,
-                actions = { if (selecting) { LucentIcon(Icons.Outlined.SelectAll, "全选", onClick = onSelectAll); LucentIcon(Icons.Outlined.Close, "取消选择", onClick = onSelectMode) }
-                    else { LucentIcon(Icons.Outlined.Checklist, "选择", onClick = onSelectMode); LucentIcon(Icons.Outlined.Refresh, "刷新", onClick = onRefresh); LucentIcon(Icons.Outlined.Settings, "设置", onClick = onSettings) } })
+                onTitleDoubleTap = { titleTick(); scope.launch { gridState.animateScrollToItem(0) } },
+                actions = {
+                    if (selecting) {
+                        LucentIcon(Icons.Outlined.SelectAll, "全选", onClick = onSelectAll)
+                        LucentIcon(Icons.Outlined.Close, "取消选择", onClick = onSelectMode)
+                    } else {
+                        Box {
+                            LucentIcon(Icons.Outlined.GridView, "每行媒体数量", onClick = { columnsOpen = true })
+                            DropdownMenu(expanded = columnsOpen, onDismissRequest = { columnsOpen = false },
+                                modifier = Modifier.widthIn(min = 188.dp, max = 240.dp),
+                                shape = RoundedCornerShape(22.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                                Text("每行图片与视频", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium)
+                                (1..5).forEach { value ->
+                                    DropdownMenuItem(text = { Text("${value} 列") },
+                                        leadingIcon = { Icon(if (columns == value) Icons.Outlined.RadioButtonChecked else Icons.Outlined.RadioButtonUnchecked, null) },
+                                        onClick = hapticClick { columnsOpen = false; onColumnsChange(value) })
+                                }
+                            }
+                        }
+                        Box {
+                            LucentIcon(Icons.Outlined.MoreVert, "更多", onClick = { moreOpen = true; sortOpen = false })
+                            DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false },
+                                modifier = Modifier.widthIn(min = 208.dp, max = 240.dp),
+                                shape = RoundedCornerShape(24.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                                DropdownMenuItem(text = { Text("多选") }, leadingIcon = { Icon(Icons.Outlined.Checklist, null) },
+                                    onClick = hapticClick { moreOpen = false; onSelectMode() })
+                                DropdownMenuItem(text = { Text("刷新") }, leadingIcon = { Icon(Icons.Outlined.Refresh, null) },
+                                    onClick = hapticClick { moreOpen = false; onRefresh() })
+                                HorizontalDivider(Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                                DropdownMenuItem(text = { Text("排序方式") },
+                                    leadingIcon = { Icon(Icons.Outlined.Sort, null) },
+                                    trailingIcon = { Icon(Icons.Outlined.ChevronRight, "进入排序菜单") },
+                                    onClick = hapticClick { moreOpen = false; sortOpen = true })
+                                DropdownMenuItem(text = { Text("设置") }, leadingIcon = { Icon(Icons.Outlined.Settings, null) },
+                                    onClick = hapticClick { moreOpen = false; onSettings() })
+                            }
+                            DropdownMenu(expanded = sortOpen, onDismissRequest = { sortOpen = false },
+                                modifier = Modifier.widthIn(min = 208.dp, max = 240.dp),
+                                shape = RoundedCornerShape(24.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                                DropdownMenuItem(text = { Text("排序方式", style = MaterialTheme.typography.titleSmall) },
+                                    leadingIcon = { Icon(Icons.Outlined.ArrowBack, null) },
+                                    onClick = hapticClick { sortOpen = false; moreOpen = true })
+                                HorizontalDivider(Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                                AlbumSort.entries.forEach { mode ->
+                                    DropdownMenuItem(text = { Text(mode.label) },
+                                        leadingIcon = { if (sortMode == mode) Icon(Icons.Outlined.Check, null) },
+                                        trailingIcon = {
+                                            if (sortMode == mode) Icon(
+                                                if (sortDescending) Icons.Outlined.ArrowDownward else Icons.Outlined.ArrowUpward,
+                                                if (sortDescending) "降序" else "升序"
+                                            )
+                                        },
+                                        onClick = hapticClick { sortOpen = false; onSortChange(mode) })
+                                }
+                            }
+                        }
+                    }
+                })
             if (selecting && path == folders) Box(Modifier.align(Alignment.BottomCenter)) { ReviewBottomBar(-1, floating = true, glass = LocalLucentStyle.current.glass, translucent = LocalLucentStyle.current.translucent,
                 names = listOf("下载", "属性", "删除"), inactive = listOf(Icons.Outlined.Download, Icons.Outlined.Info, Icons.Outlined.Delete),
                 active = listOf(Icons.Outlined.Download, Icons.Outlined.Info, Icons.Outlined.Delete), select = onAction) }
         }) {
             val gridUnits = (1..20).first { it % columns == 0 && it % folderColumns == 0 }
-            LazyVerticalGrid(columns = GridCells.Fixed(gridUnits), modifier = Modifier.fillMaxSize().statusBarsPadding(),
-                contentPadding = PaddingValues(start = 13.dp, end = 13.dp, top = 69.dp, bottom = (if (selecting) 96.dp else 21.dp) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())) {
+            val mediaStart = folderItems.size + if (folderItems.isNotEmpty() && mediaItems.isNotEmpty()) 1 else 0
+            PullToRefreshBox(
+                isRefreshing = loading && path == folders,
+                onRefresh = { if (!loading && path == folders) { titleTick(); onRefresh() } },
+                modifier = Modifier.fillMaxSize().statusBarsPadding().padding(top = 56.dp),
+            ) {
+            LazyVerticalGrid(columns = GridCells.Fixed(gridUnits), state = gridState,
+                modifier = Modifier.fillMaxSize().pointerInput(path, mediaItems, loading) {
+                    fun mediaAt(position: androidx.compose.ui.geometry.Offset): Int? {
+                        val cell = gridState.layoutInfo.visibleItemsInfo.firstOrNull { info ->
+                            position.x >= info.offset.x && position.x < info.offset.x + info.size.width &&
+                                position.y >= info.offset.y && position.y < info.offset.y + info.size.height
+                        } ?: return null
+                        return (cell.index - mediaStart).takeIf { it in mediaItems.indices }
+                    }
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val pressed = awaitLongPressOrCancellation(down.id)
+                        if (pressed != null && !loading && path == folders) {
+                            val anchor = mediaAt(pressed.position)
+                            if (anchor != null) {
+                                pressed.consume()
+                                pressTick()
+                                onRangeSelection(anchor, anchor, true)
+                                var latest = anchor
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) break
+                                    val index = mediaAt(change.position)
+                                    if (index != null && index != latest) {
+                                        latest = index
+                                        selectionTick()
+                                        onRangeSelection(anchor, latest, false)
+                                    }
+                                    change.consume()
+                                }
+                            }
+                        }
+                    }
+                },
+                contentPadding = PaddingValues(start = 13.dp, end = 13.dp, top = 13.dp, bottom = (if (selecting) 96.dp else 21.dp) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())) {
                 items(folderItems, key = { it.url }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(gridUnits / folderColumns) }) { folder ->
                     FolderCard(folder, folderColumns, !loading && path == folders) { onFolder(folder) }
                 }
@@ -356,7 +508,7 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
                 items(photos.size, key = { mediaItems[it].url }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(gridUnits / columns) }) { index ->
                     Box(Modifier.padding(3.dp)) {
                     GalleryThumbnail(photos[index], sourceMap.getOrPut(index) { GalleryOrigin(12.dp) }, Modifier.fillMaxWidth().aspectRatio(1f).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)),
-                        onLongClick = { if (!loading && path == folders) onSelection(mediaItems[index]) }) {
+                        onLongClick = null) {
                         if (!loading && path == folders) { if (selecting) onSelection(mediaItems[index]) else onGallery(photos, index, sourceMap) }
                     }
                     if (selecting) Icon(if (mediaItems[index].url in selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked, "选择 ${mediaItems[index].name}",
@@ -369,6 +521,7 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
                 if (!loading && folderError == null && list.none { it.directory || it.image || it.video }) item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     LucentEmpty("这里还没有媒体", "此目录没有子文件夹或支持的媒体格式。")
                 }
+            }
             }
         }
     }

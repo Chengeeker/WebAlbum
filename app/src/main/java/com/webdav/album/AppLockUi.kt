@@ -36,6 +36,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import dev.chengeeker.lucent.*
+import dev.chengeeker.lucent.review.hapticClick
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -182,7 +183,7 @@ fun LockScreen(lock: AppLock, activity: MainActivity, onVerified: () -> Unit) {
 fun AuthenticationDialog(lock: AppLock, activity: MainActivity, onDismiss: () -> Unit, onVerified: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text("验证身份") },
         text = { AuthenticationForm(lock, activity, onVerified) },
-        confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
+        confirmButton = {}, dismissButton = { TextButton(onClick = hapticClick(onDismiss)) { Text("取消") } })
 }
 
 @Composable
@@ -199,7 +200,7 @@ fun PinSetupDialog(lock: AppLock, onDismiss: () -> Unit, onSaved: () -> Unit) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation())
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
-    }, confirmButton = { TextButton(enabled = !busy, onClick = {
+    }, confirmButton = { TextButton(enabled = !busy, onClick = hapticClick {
         when { !validPin(pin) -> error = "请输入 4–12 位数字"; pin != confirm -> error = "两次输入的 PIN 码不一致"; else -> {
             busy = true; scope.launch {
                 val result = runCatching { withContext(Dispatchers.Default) { lock.setPin(pin) } }
@@ -207,5 +208,5 @@ fun PinSetupDialog(lock: AppLock, onDismiss: () -> Unit, onSaved: () -> Unit) {
                 result.onSuccess { pin = ""; confirm = ""; onSaved() }.onFailure { error = "保存失败，请重试" }
             }
         } }
-    }) { Text("保存") } }, dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") } })
+    }) { Text("保存") } }, dismissButton = { TextButton(enabled = !busy, onClick = hapticClick(onDismiss)) { Text("取消") } })
 }

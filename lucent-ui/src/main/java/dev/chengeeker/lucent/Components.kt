@@ -4,6 +4,8 @@ import androidx.compose.material.icons.outlined.*
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
@@ -75,9 +77,9 @@ fun LucentIcon(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LucentHeader(title:String,onBack:(()->Unit)?=null,actions:@Composable RowScope.()->Unit={}) {
+fun LucentHeader(title:String,onBack:(()->Unit)?=null,actions:@Composable RowScope.()->Unit={},onTitleDoubleTap:(()->Unit)?=null) {
  Box(Modifier.frostedBackdrop(MaterialTheme.colorScheme.background).statusBarsPadding()) {
- TopAppBar(title={Text(title,Modifier.padding(start=16.dp),fontSize=18.sp,fontWeight=reviewWeight(FontWeight.Bold))},
+ TopAppBar(title={Text(title,Modifier.fillMaxWidth().padding(start=16.dp).then(if (onTitleDoubleTap != null) Modifier.pointerInput(onTitleDoubleTap) { detectTapGestures(onDoubleTap = { onTitleDoubleTap() }) } else Modifier),fontSize=18.sp,fontWeight=reviewWeight(FontWeight.Bold))},
  navigationIcon={if(onBack!=null)IconButton(onClick=hapticClick(onBack)){Icon(Icons.AutoMirrored.Rounded.ArrowBack,"返回")}},
  actions=actions,expandedHeight=56.dp,windowInsets=WindowInsets(0),colors=TopAppBarDefaults.topAppBarColors(containerColor=Color.Transparent))
  }

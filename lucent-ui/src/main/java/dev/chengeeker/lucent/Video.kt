@@ -8,6 +8,8 @@ import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.media.AudioManager
+import android.os.SystemClock
+import android.view.ViewConfiguration
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -18,6 +20,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -229,9 +233,32 @@ fun LucentVideo(
         Box(
             Modifier.fillMaxSize()
                 .pointerInput(player, speed) {
+                    // Compose detectTapGestures(onDoubleTap=...) defers the SINGLE-tap
+                    // callback until the double-tap timeout. Respond on the first tap
+                    // instead, then undo its visibility toggle on the second tap.
+                    var lastTapTime = 0L
+                    var lastTapPosition = Offset.Unspecified
+                    val doubleTapTimeout = ViewConfiguration.getDoubleTapTimeout()
+                    val doubleTapSlop = ViewConfiguration.get(context).scaledDoubleTapSlop.toFloat()
                     detectTapGestures(
-                        onTap = { pulse(); controls = !controls; onControlsVisibilityChanged(controls) },
-                        onDoubleTap = { pulse(); if (player.isPlaying) player.pause() else player.play() },
+                        onTap = { point ->
+                            val now = SystemClock.uptimeMillis()
+                            val isDoubleTap = lastTapTime > 0L &&
+                                now - lastTapTime <= doubleTapTimeout &&
+                                lastTapPosition.isSpecified &&
+                                (point - lastTapPosition).getDistance() <= doubleTapSlop
+                            pulse()
+                            controls = !controls
+                            onControlsVisibilityChanged(controls)
+                            if (isDoubleTap) {
+                                lastTapTime = 0L
+                                lastTapPosition = Offset.Unspecified
+                                if (player.isPlaying) player.pause() else player.play()
+                            } else {
+                                lastTapTime = now
+                                lastTapPosition = point
+                            }
+                        },
                         onLongPress = {
                             pulse()
                             player.setPlaybackSpeed(2f)

@@ -72,6 +72,27 @@ class PreferencesAndLockTest {
         assertEquals(5, reloaded.columns)
     }
 
+    @Test fun sortingPersistsAndOlderBackupsUseNewestModifiedFirst() {
+        val prefs = AlbumPreferences(app)
+        assertEquals(AlbumSort.MODIFIED, prefs.sortMode)
+        assertTrue(prefs.sortDescending)
+        prefs.updateSort(AlbumSort.NAME)
+        assertTrue(prefs.sortDescending)
+        prefs.updateSort(AlbumSort.NAME)
+        assertFalse(prefs.sortDescending)
+        val restored = AlbumPreferences(app)
+        assertEquals(AlbumSort.NAME, restored.sortMode)
+        assertFalse(restored.sortDescending)
+        val backup = restored.exportSettings()
+        restored.updateSort(AlbumSort.CAPTURE)
+        restored.importSettings(backup)
+        assertEquals(AlbumSort.NAME, restored.sortMode)
+        assertFalse(restored.sortDescending)
+        restored.importSettings(org.json.JSONObject(backup).apply { remove("sortMode"); remove("sortDescending") }.toString())
+        assertEquals(AlbumSort.MODIFIED, restored.sortMode)
+        assertTrue(restored.sortDescending)
+    }
+
     @Test fun networkSettingsPersistAndConfigureNewClients() {
         val prefs = AlbumPreferences(app)
         val direct = NetworkSettings(timeout = 15, mode = "direct")

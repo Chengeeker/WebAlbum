@@ -32,6 +32,10 @@ class AlbumPreferences(context: Context) {
         private set
     var folderColumns by mutableIntStateOf(prefs.getInt("folderColumns", 2).coerceIn(1, 5))
         private set
+    var sortMode by mutableStateOf(AlbumSort.from(prefs.getString("sortMode", "modified")))
+        private set
+    var sortDescending by mutableStateOf(prefs.getBoolean("sortDescending", true))
+        private set
     var downloadTree by mutableStateOf(prefs.getString("downloadTree", "").orEmpty())
         private set
     var predictive by mutableStateOf(prefs.getBoolean("predictive", false))
@@ -57,6 +61,11 @@ class AlbumPreferences(context: Context) {
     }
     fun updateColumns(value: Int) { val v = value.coerceIn(1, 5); check(prefs.edit().putInt("columns", v).commit()); columns = v }
     fun updateFolderColumns(value: Int) { val v = value.coerceIn(1, 5); check(prefs.edit().putInt("folderColumns", v).commit()); folderColumns = v }
+    fun updateSort(mode: AlbumSort) {
+        val reverse = if (sortMode == mode) !sortDescending else true
+        check(prefs.edit().putString("sortMode", mode.key).putBoolean("sortDescending", reverse).commit())
+        sortMode = mode; sortDescending = reverse
+    }
     fun updateDownloadTree(value: String) { check(prefs.edit().putString("downloadTree", value).commit()); downloadTree = value }
     fun updatePredictive(value: Boolean) { check(prefs.edit().putBoolean("predictive", value).commit()); predictive = value }
     fun updatePrivacy(value: Boolean) { check(prefs.edit().putBoolean("privacy", value).commit()); privacy = value }
@@ -71,7 +80,7 @@ class AlbumPreferences(context: Context) {
     fun exportSettings(): String = JSONObject().put("format", 1).put("mode", style.mode).put("dynamic", style.dynamic)
         .put("seed", style.seed).put("black", style.black).put("font", style.font.toDouble()).put("weight", style.weight)
         .put("weightCustom", style.customWeight).put("glass", style.glass).put("translucent", style.translucent).put("motion", style.motion).put("haptics", style.haptics)
-        .put("columns", columns).put("folderColumns", folderColumns).put("predictive", predictive).put("privacy", privacy).put("refresh", refresh)
+        .put("columns", columns).put("folderColumns", folderColumns).put("sortMode", sortMode.key).put("sortDescending", sortDescending).put("predictive", predictive).put("privacy", privacy).put("refresh", refresh)
         .put("cacheThreshold", cacheThreshold).toString(2)
 
     fun importSettings(text: String) {
@@ -83,14 +92,17 @@ class AlbumPreferences(context: Context) {
             motion = json.getBoolean("motion"), haptics = json.getBoolean("haptics"))
         val newColumns = json.getInt("columns"); val newFolderColumns = if (json.has("folderColumns")) json.getInt("folderColumns") else 2; val newPredictive = json.getBoolean("predictive")
         val newPrivacy = json.getBoolean("privacy"); val newRefresh = json.getInt("refresh"); val newThreshold = json.getInt("cacheThreshold")
+        val newSort = AlbumSort.from(json.optString("sortMode", "modified"))
+        val newDescending = json.optBoolean("sortDescending", true)
         require(value.mode in listOf("system", "light", "dark") && value.seed in 0..7 && value.font.isFinite() && value.font in .85f..1.5f &&
             value.weight in -3..3 && newColumns in 1..5 && newFolderColumns in 1..5 && newRefresh in 0..240 && newThreshold in listOf(0, 16, 64, 256, 512, 1024))
         check(prefs.edit().putString("mode", value.mode).putBoolean("dynamic", value.dynamic).putInt("seed", value.seed)
             .putBoolean("black", value.black).putFloat("font", value.font).putInt("weight", value.weight).putBoolean("weightCustom", value.customWeight)
             .putBoolean("glass", value.glass).putBoolean("translucent", value.translucent).putBoolean("motion", value.motion).putBoolean("haptics", value.haptics)
-            .putInt("columns", newColumns).putInt("folderColumns", newFolderColumns).putBoolean("predictive", newPredictive).putBoolean("privacy", newPrivacy)
+            .putInt("columns", newColumns).putInt("folderColumns", newFolderColumns).putString("sortMode", newSort.key).putBoolean("sortDescending", newDescending)
+            .putBoolean("predictive", newPredictive).putBoolean("privacy", newPrivacy)
             .putInt("refresh", newRefresh).putInt("cacheThreshold", newThreshold).commit())
-        style = value; columns = newColumns; folderColumns = newFolderColumns; predictive = newPredictive; privacy = newPrivacy; refresh = newRefresh; cacheThreshold = newThreshold
+        style = value; columns = newColumns; folderColumns = newFolderColumns; sortMode = newSort; sortDescending = newDescending; predictive = newPredictive; privacy = newPrivacy; refresh = newRefresh; cacheThreshold = newThreshold
     }
     fun setIcon(context: Context, value: Int) {
         require(value in 0..2)

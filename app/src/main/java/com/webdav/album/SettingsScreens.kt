@@ -30,6 +30,7 @@ import dev.chengeeker.lucent.review.FontWeightSetting
 import dev.chengeeker.lucent.review.LocalPageActive
 import dev.chengeeker.lucent.review.NavigationGlassChoice
 import dev.chengeeker.lucent.review.SettingsTile
+import dev.chengeeker.lucent.review.hapticClick
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -134,10 +135,10 @@ fun SettingsBackupPage(prefs: AlbumPreferences, locked: Boolean, onBack: () -> U
     pending?.takeIf { !locked }?.let { text ->
         AlertDialog(onDismissRequest = { pending = null }, title = { Text("恢复设置？") },
             text = { Text("将覆盖当前的外观、布局和缓存偏好；连接和应用锁保持不变。") },
-            confirmButton = { TextButton(onClick = {
+            confirmButton = { TextButton(onClick = hapticClick {
                 val result = runCatching { prefs.importSettings(text) }; pending = null
                 report(result.fold({ "设置已恢复" }, { "设置文件无效，原有设置未更改。" }))
-            }) { Text("恢复") } }, dismissButton = { TextButton(onClick = { pending = null }) { Text("取消") } })
+            }) { Text("恢复") } }, dismissButton = { TextButton(onClick = hapticClick { pending = null }) { Text("取消") } })
     }
 }
 
@@ -225,11 +226,11 @@ fun CacheSettingsPage(prefs: AlbumPreferences, locked: Boolean, onBack: () -> Un
     }
     if (threshold && !locked) AlertDialog(onDismissRequest = { threshold = false }, title = { Text("启动时自动清理阈值") }, text = {
         Column { listOf(0, 16, 64, 256, 512, 1024).forEach { value -> LucentRow(if (value == 0) "关闭" else "$value MiB", onClick = { prefs.updateCacheThreshold(value); threshold = false }, trailing = { RadioButton(prefs.cacheThreshold == value, null) }) } }
-    }, confirmButton = { TextButton(onClick = { threshold = false }) { Text("取消") } })
+    }, confirmButton = { TextButton(onClick = hapticClick { threshold = false }) { Text("取消") } })
     if (confirm && !locked) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("清理图片缓存？") },
         text = { Text("不会删除服务器文件和已下载的图片。") },
-        confirmButton = { TextButton(onClick = { confirm = false; onClear { success -> if (success) bytes = 0 } }) { Text("清理") } },
-        dismissButton = { TextButton(onClick = { confirm = false }) { Text("取消") } })
+        confirmButton = { TextButton(onClick = hapticClick { confirm = false; onClear { success -> if (success) bytes = 0 } }) { Text("清理") } },
+        dismissButton = { TextButton(onClick = hapticClick { confirm = false }) { Text("取消") } })
 }
 
 @Composable

@@ -41,6 +41,7 @@ fun PageStack(routes: List<ReviewRoute>, content: @Composable (ReviewRoute) -> U
             val live = route.key in liveKeys
             val active = live && route.key == liveKeys.lastOrNull()
             val offset = remember { Animatable(if (route.name == "root") 0f else 1f) }
+            val underneathOffset = remember { Animatable(0f) }
             val owner = remember { PageLifecycle() }
             val currentActive by rememberUpdatedState(active)
             DisposableEffect(host, owner) {
@@ -56,7 +57,14 @@ fun PageStack(routes: List<ReviewRoute>, content: @Composable (ReviewRoute) -> U
                 else if (live) offset.animateTo(0f, tween(320, easing = CubicBezierEasing(.215f, .61f, .355f, 1f)))
                 else { offset.animateTo(1f, tween(220, easing = CubicBezierEasing(.55f, .055f, .675f, .19f))); mounted.remove(route) }
             }
-            Box(Modifier.fillMaxSize().graphicsLayer { translationX = offset.value * width * direction }
+            // The previous screen also moves subtly into view on Back instead of
+            // appearing fixed/instantly beneath the departing page.
+            LaunchedEffect(active, live, motion) {
+                val target = if (live && !active) -.08f else 0f
+                if (!motion) underneathOffset.snapTo(target)
+                else underneathOffset.animateTo(target, tween(280, easing = CubicBezierEasing(.215f, .61f, .355f, 1f)))
+            }
+            Box(Modifier.fillMaxSize().graphicsLayer { translationX = (offset.value + underneathOffset.value) * width * direction }
                 .then(if (active) Modifier else Modifier.clearAndSetSemantics {})) {
                 CompositionLocalProvider(LocalLifecycleOwner provides owner, LocalPageActive provides active, LocalReviewRoute provides route) { content(route) }
             }
