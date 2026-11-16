@@ -44,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -190,7 +191,7 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
                 if (showControls) bars.show(status) else bars.hide(status)
             }
         }
-        val hasHdr = item.hdr
+        val hasHdr = item.hdr || GalleryHdrRegistry.observeHdr(item.url)
         var hdrActive by remember(window) { mutableStateOf(false) }
         LaunchedEffect(hasHdr, motion.position == 1f, closing) {
             if (!hasHdr) hdrActive = false
@@ -240,7 +241,8 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
                     if (page == pager.settledPage && !pager.isScrollInProgress && !closing) key(picture.video) {
                         LucentVideo(listOf(VideoSource("自动", picture.video)), Modifier.fillMaxSize(), autoplay = true, title = picture.description,
                             onControlsHeight = { videoControlsHeight = it }, onControlsVisibilityChanged = { showControls = it },
-                            onFullscreenChanged = { videoFullscreen = it })
+                            onFullscreenChanged = { videoFullscreen = it },
+                            onHdrMetadataChanged = { detected -> if (detected) GalleryHdrRegistry.recordHdr(picture.url) })
                     } else Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
                         GalleryMediaImage(picture, "视频封面", Modifier.fillMaxSize())
                         Icon(Icons.Rounded.PlayCircle, "播放视频", Modifier.size(56.dp), tint = Color.White)
@@ -250,7 +252,9 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
                     var scale by remember(page) { mutableFloatStateOf(1f) }
                     var pan by remember(page) { mutableStateOf(Offset.Zero) }
                     var displayedBitmap by remember(page) { mutableStateOf(firstBitmap) }
+                    var fullImageReady by remember(page, picture.url) { mutableStateOf(false) }
                     var zoomAnimation by remember(page) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+                    GalleryAdjacentPrefetch(media, page, fullImageReady && page == pager.settledPage && !pager.isScrollInProgress && !closing)
                     DisposableEffect(page) {
                         pagePlanes[page] = {
                             displayedBitmap?.takeUnless(Bitmap::isRecycled)?.let { bitmap ->
@@ -305,8 +309,8 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
                                 dragY += delta; dragFraction = abs(dragY) / (height * .5f)
                             } }, contentAlignment = Alignment.Center) {
                             Box(Modifier.fillMaxSize().graphicsLayer { scaleX = scale; scaleY = scale; translationX = pan.x; translationY = pan.y + dragY }, contentAlignment = Alignment.Center) {
-                                OriginalImage(picture, Modifier.fillMaxSize(),
-                                    onBitmap = { displayedBitmap = it }, showImage = !morphing)
+                                OriginalImage(picture, Modifier.fillMaxSize(), previewBitmap = firstBitmap,
+                                    onBitmap = { displayedBitmap = it; fullImageReady = true }, showImage = !morphing)
                                 if (page == pager.currentPage && liveUrl != null && !closing && !morphing)
                                     LivePhotoLayer(liveUrl!!, playingMotion, onError = { playingMotion = false; motionError = true },
                                         onStopped = { playingMotion = false }, modifier = Modifier.fillMaxSize())
@@ -346,7 +350,7 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
                 Spacer(Modifier.weight(1f))
                 GalleryGlassButton(Icons.Rounded.Download, "下载", enabled = !saving, busy = saving) { save(item) }
             }
-            if (chrome && hasHdr) HdrBadge(Modifier.align(Alignment.BottomEnd).windowInsetsPadding(bottomInsets)
+            if (chrome && hasHdr && item.video.isBlank()) HdrBadge(Modifier.align(Alignment.BottomEnd).windowInsetsPadding(bottomInsets)
                 .padding(end = 16.dp, bottom = if (media.size > 1) 110.dp else 24.dp))
             if (motionError && chrome) Text("动态照片播放失败", Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .7f), RoundedCornerShape(12.dp)).padding(12.dp), color = Color.White)
             if (chrome && media.size > 1 && !(landscape && videoThumbnail)) GalleryThumbnails(media, pager,
@@ -420,8 +424,9 @@ internal fun GalleryThumbnails(media: List<GalleryMedia>, pager: androidx.compos
                                 .padding(horizontal = 3.dp, vertical = 1.dp),
                             color = Color.White, fontSize = 8.sp)
                         if (!selected) Box(Modifier.matchParentSize().background(Color.White.copy(alpha = .5f)))
-                        if (item.hdr) HdrBadge(Modifier.align(Alignment.BottomEnd).padding(3.dp),
-                            description = "第 ${index + 1} 张 HDR 图片", compact = true)
+                        if (item.hdr || GalleryHdrRegistry.observeHdr(item.url)) HdrBadge(
+                            Modifier.align(if (item.video.isNotBlank()) Alignment.TopEnd else Alignment.BottomEnd).padding(3.dp),
+                            description = if (item.video.isNotBlank()) "第 ${index + 1} 个 HDR 视频" else "第 ${index + 1} 张 HDR 图片", compact = true)
                     }
                 }
             }
@@ -438,28 +443,85 @@ data class GalleryMedia(val url: String, val preview: String = "", val width: In
     coil.compose.AsyncImage(media.url, description, modifier, contentScale = androidx.compose.ui.layout.ContentScale.Crop)
 }
 
-@Composable private fun OriginalImage(media: GalleryMedia, modifier: Modifier, onBitmap: (Bitmap) -> Unit, showImage: Boolean) {
+@Composable private fun OriginalImage(
+    media: GalleryMedia,
+    modifier: Modifier,
+    previewBitmap: Bitmap?,
+    onBitmap: (Bitmap) -> Unit,
+    showImage: Boolean,
+) {
     var attempt by remember(media.url) { mutableIntStateOf(0) }
-    val request = coil.request.ImageRequest.Builder(LocalContext.current).data(media.url).allowHardware(false).build()
-    key(media.url, attempt) {
-        coil.compose.SubcomposeAsyncImage(request, media.description, modifier.graphicsLayer { alpha = if (showImage) 1f else 0f },
-            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-            onSuccess = { state -> onBitmap(state.result.drawable.galleryBitmap()) },
-            success = { state ->
-                val bitmap = (state.result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
-                if (bitmap == null) SubcomposeAsyncImageContent()
-                else AndroidView(
-                    factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.FIT_CENTER } },
-                    modifier = Modifier.fillMaxSize(),
-                    update = { it.setImageBitmap(bitmap); it.contentDescription = media.description },
-                    onRelease = { it.setImageDrawable(null) },
-                )
-            },
-            loading = { Box(contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(24.dp), color = Color.White) } },
-            error = { state -> Box(contentAlignment = Alignment.Center) { TextButton(onClick = hapticClick { attempt++ }) { Text(galleryLoadError(state.result.throwable) + "\n点击重试", color = Color.White, textAlign = androidx.compose.ui.text.style.TextAlign.Center) } } })
+    val context = LocalContext.current
+    val motionEnabled = dev.chengeeker.lucent.LocalLucentStyle.current.motion
+    val request = remember(context, media.url, attempt) {
+        coil.request.ImageRequest.Builder(context).data(media.url).allowHardware(false).build()
+    }
+    var ready by remember(media.url, attempt) { mutableStateOf(false) }
+    var failure by remember(media.url, attempt) { mutableStateOf<Throwable?>(null) }
+    val fullAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (ready) 1f else 0f,
+        animationSpec = tween(if (motionEnabled) 180 else 0, easing = galleryCurve),
+        label = "progressive-image-quality",
+    )
+    // Reuse the already-decoded grid bitmap. No second low-resolution GET is made.
+    val preview = previewBitmap?.takeUnless(Bitmap::isRecycled)
+    Box(modifier, contentAlignment = Alignment.Center) {
+        if (preview != null && fullAlpha < 1f) {
+            androidx.compose.foundation.Image(
+                bitmap = preview.asImageBitmap(),
+                contentDescription = media.description,
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    alpha = if (showImage) 1f - fullAlpha else 0f
+                },
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+            )
+        }
+        key(media.url, attempt) {
+            coil.compose.SubcomposeAsyncImage(
+                request, media.description,
+                Modifier.fillMaxSize().graphicsLayer {
+                    alpha = if (showImage) fullAlpha else 0f
+                },
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                onSuccess = { state ->
+                    failure = null
+                    val bitmap = state.result.drawable.galleryBitmap()
+                    if (bitmapHasHdrGainmap(bitmap)) GalleryHdrRegistry.recordHdr(media.url)
+                    onBitmap(bitmap)
+                    ready = true
+                },
+                onError = { state -> failure = state.result.throwable },
+                success = { state ->
+                    val bitmap = (state.result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                    if (bitmap == null) SubcomposeAsyncImageContent()
+                    else AndroidView(
+                        factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.FIT_CENTER } },
+                        modifier = Modifier.fillMaxSize(),
+                        update = { it.setImageBitmap(bitmap); it.contentDescription = media.description },
+                        onRelease = { it.setImageDrawable(null) },
+                    )
+                },
+                loading = {},
+                error = {},
+            )
+        }
+        // The spinner is a fallback only when there was no grid bitmap to show.
+        if (showImage && !ready && preview == null && failure == null) {
+            CircularProgressIndicator(Modifier.size(24.dp), color = Color.White)
+        }
+        if (showImage && failure != null) {
+            Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = if (preview != null) Alignment.BottomCenter else Alignment.Center) {
+                TextButton(
+                    onClick = hapticClick { attempt++ },
+                    modifier = Modifier.background(Color.Black.copy(alpha = .7f), RoundedCornerShape(12.dp)),
+                ) {
+                    Text(galleryLoadError(failure!!) + "\n点击重试", color = Color.White,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
+            }
+        }
     }
 }
-
 internal fun galleryLoadError(error: Throwable): String = when (error) {
     is coil.network.HttpException -> when (val code = error.response.code) {
         401, 403 -> "服务器拒绝访问（HTTP $code），请检查账号权限"

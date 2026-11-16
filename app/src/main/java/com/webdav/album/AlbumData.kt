@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.os.Build
 import android.util.Base64
 import android.util.Xml
 import coil.ImageLoader
@@ -100,7 +101,13 @@ class AlbumApplication : Application(), ImageLoaderFactory {
         // A local-only Wi-Fi network can reach WebDAV without Android's INTERNET capability.
         .networkObserverEnabled(false)
         .respectCacheHeaders(false)
-        .components { add(VideoThumbnailFetcher.Factory({ client }, ::connectionRevision, { connection })); add(ParallelImageFetcher.Factory({ client }, cacheDir.resolve("download-parts"))); add(GifDecoder.Factory()) }
+        .components {
+            add(VideoThumbnailFetcher.Factory({ client }, ::connectionRevision, { connection }))
+            add(ParallelImageFetcher.Factory({ client }, cacheDir.resolve("download-parts")))
+            add(GifDecoder.Factory())
+            // ImageDecoder on Android 14+ preserves Ultra HDR gainmaps and wide-gamut metadata.
+            if (Build.VERSION.SDK_INT >= 34) add(coil.decode.ImageDecoderDecoder.Factory())
+        }
         .diskCache { DiskCache.Builder().directory(cacheDir.resolve("images")).maxSizeBytes(1280L * 1024 * 1024).build() }
         .build()
     override fun onCreate() {

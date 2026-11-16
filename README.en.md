@@ -17,10 +17,12 @@ The app uses **Material Design 3** and UI components from my [**LucentUI**](http
 - **Photo viewing:** Common formats including JPEG, PNG, WebP, GIF, BMP, HEIC/HEIF, and AVIF, subject to Android device support. Preview, zoom, and swipe through images.
 - **Video playback:** Powered by AndroidX Media3 / ExoPlayer, with video thumbnails, play/pause, progress and seeking, landscape fullscreen, playback speed, brightness and volume gestures. Actual codec and container support depends on the device and server.
 - **Motion photos:** Recognition/playback for compatible motion-photo media, depending on file format and device.
+- **Progressive previews:** Show cached thumbnails first, then fade in the full-resolution image, prefetching only nearby pictures. Plain WebDAV may not provide server-generated thumbnails, so initial requests can still fetch source files.
+- **HDR media:** Detect Ultra HDR images with gain maps on Android 14+, and HLG/PQ video via actual color metadata. HDR badges and a more suitable video output path are used on compatible devices; results depend on the display, platform, and decoder.
 - **On-demand image caching:** Load thumbnails and previews without downloading the full remote library.
 
 ### Gallery and file operations
-- **Folders and grid layout:** Browse nested directories and see photos/videos in a unified media grid. Choose 1–5 media columns, with a separate folder-grid preference.
+- **Folders and grid layout:** Browse nested directories and see photos/videos in a unified media grid. Choose 1–5 media columns, with a separate folder-grid preference. Optional filename cards in 1–3 columns can trim common Screenshot, IMG, VID, and WeChat-export prefixes.
 - **Quick navigation:** Pull to refresh and double-tap the top-bar title to scroll to the top.
 - **Sorting:** Sort by capture time, modified time, or filename, in ascending or descending order. Most recently modified files appear first by default.
 - **Range selection:** Long-press and drag to select multiple items; drag back toward the start to shrink the selection. Download, inspect properties, or delete selected files.
@@ -38,11 +40,11 @@ The app uses **Material Design 3** and UI components from my [**LucentUI**](http
 
 Download a signed APK from [GitHub Releases](https://github.com/Chengeeker/WebAlbum/releases).
 
-**[Download WebAlbum v1.2.4 (arm64-v8a)](https://github.com/Chengeeker/WebAlbum/releases/download/v1.2.4/WebAlbum_v1.2.4_arm64-v8a.apk)**
+**[Download WebAlbum v1.2.7 (arm64-v8a)](https://github.com/Chengeeker/WebAlbum/releases/download/v1.2.7/WebAlbum_v1.2.7_arm64-v8a.apk)**
 
 | Item | Requirement |
 | --- | --- |
-| Current version | **1.2.4** (version code 10) |
+| Current version | **1.2.7** (version code 13) |
 | Android | **8.0 / API 26 or later** |
 | CPU architecture | **arm64-v8a** |
 | Application ID | `com.webdav.album` |

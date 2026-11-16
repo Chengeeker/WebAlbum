@@ -33,6 +33,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -236,7 +238,7 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                             if (connection == next) load(home(next), fallback = true)
                         }
                     }
-                    else BrowsePage(config, folders, snapshots, prefs.columns, prefs.folderColumns, prefs.sortMode, prefs.sortDescending, captureTimes, loading, folderError, selecting, selected,
+                    else BrowsePage(config, folders, snapshots, prefs.columns, prefs.folderColumns, prefs.showMediaNames, prefs.compactMediaNames, prefs.sortMode, prefs.sortDescending, captureTimes, loading, folderError, selecting, selected,
                         onBack = { load(folders.dropLast(1)) }, onFolder = { load(folders + it.url) },
                         onRefresh = { cancelPrefetch(); folderCache.clear(); load(folders, force = true) }, onSettings = { open("settings") },
                         onSelection = { item -> selecting = true; if (item.url in selected) selected.remove(item.url) else selected.add(item.url) },
@@ -363,7 +365,7 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map<String, List<DavItem>>, columns: Int, folderColumns: Int,
-    sortMode: AlbumSort, sortDescending: Boolean, captureTimes: Map<String, Long>, loading: Boolean, folderError: String?, selecting: Boolean, selected: List<String>, onBack: () -> Unit, onFolder: (DavItem) -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit,
+    showMediaNames: Boolean, compactMediaNames: Boolean, sortMode: AlbumSort, sortDescending: Boolean, captureTimes: Map<String, Long>, loading: Boolean, folderError: String?, selecting: Boolean, selected: List<String>, onBack: () -> Unit, onFolder: (DavItem) -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit,
     onSelection: (DavItem) -> Unit, onSelectMode: () -> Unit, onSelectAll: () -> Unit, onAction: (Int) -> Unit,
     onColumnsChange: (Int) -> Unit, onSortChange: (AlbumSort) -> Unit, onRangeSelection: (Int, Int, Boolean) -> Unit,
     onGallery: (List<GalleryMedia>, Int, Map<Int, GalleryOrigin>) -> Unit) {
@@ -485,9 +487,13 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
                                 onRangeSelection(anchor, anchor, true)
                                 var latest = anchor
                                 while (true) {
-                                    val event = awaitPointerEvent()
+                                    // Consume UP before child click handlers run.
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
                                     val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                    if (!change.pressed) break
+                                    if (!change.pressed) {
+                                        change.consume()
+                                        break
+                                    }
                                     val index = mediaAt(change.position)
                                     if (index != null && index != latest) {
                                         latest = index
@@ -506,13 +512,53 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
                 }
                 if (folderItems.isNotEmpty() && photos.isNotEmpty()) item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(2.dp)) }
                 items(photos.size, key = { mediaItems[it].url }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(gridUnits / columns) }) { index ->
-                    Box(Modifier.padding(3.dp)) {
-                    GalleryThumbnail(photos[index], sourceMap.getOrPut(index) { GalleryOrigin(12.dp) }, Modifier.fillMaxWidth().aspectRatio(1f).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)),
-                        onLongClick = null) {
-                        if (!loading && path == folders) { if (selecting) onSelection(mediaItems[index]) else onGallery(photos, index, sourceMap) }
+                    val item = mediaItems[index]
+                    val namedCard = showMediaNames && columns <= 3
+                    val openOrSelect: () -> Unit = {
+                        if (!loading && path == folders) {
+                            if (selecting) onSelection(item) else onGallery(photos, index, sourceMap)
+                        }
                     }
-                    if (selecting) Icon(if (mediaItems[index].url in selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked, "选择 ${mediaItems[index].name}",
-                        Modifier.align(Alignment.TopEnd).padding(6.dp).clip(CircleShape).background(Color.Black.copy(alpha = .45f)).padding(2.dp), tint = Color.White)
+                    Column(
+                        Modifier.padding(3.dp).then(
+                            if (namedCard) Modifier.clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                            else Modifier
+                        )
+                    ) {
+                        Box {
+                            GalleryThumbnail(
+                                photos[index],
+                                sourceMap.getOrPut(index) { GalleryOrigin(12.dp) },
+                                Modifier.fillMaxWidth().aspectRatio(1f)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)),
+                                onLongClick = null,
+                                onClick = openOrSelect,
+                            )
+                            if (selecting) Icon(
+                                if (item.url in selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                                "选择 ${item.name}",
+                                Modifier.align(Alignment.TopEnd).padding(6.dp).clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = .45f)).padding(2.dp),
+                                tint = Color.White,
+                            )
+                        }
+                        if (namedCard) {
+                            Box(
+                                Modifier.fillMaxWidth().height(if (columns <= 2) 54.dp else 33.dp)
+                                    .lucentClick(onClick = openOrSelect)
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                Text(
+                                    displayMediaFilename(item.name, compactMediaNames),
+                                    maxLines = if (columns <= 2) 2 else 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = if (columns <= 2) MaterialTheme.typography.bodySmall else MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
                     }
                 }
                 if (!loading && folderError != null && path == folders) item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {

@@ -29,6 +29,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import dev.chengeeker.lucent.review.reviewPulse
+import dev.chengeeker.lucent.review.HdrBadge
+import dev.chengeeker.lucent.review.isHdrVideoTransfer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.layout.onSizeChanged
@@ -75,6 +77,7 @@ fun LucentVideo(
     onControlsHeight: (Int) -> Unit = {},
     onControlsVisibilityChanged: (Boolean) -> Unit = {},
     onFullscreenChanged: (Boolean) -> Unit = {},
+    onHdrMetadataChanged: (Boolean) -> Unit = {},
 ) {
     val valid = remember(sources) { manualQualities(sources) }
     if (valid.isEmpty()) {
@@ -103,6 +106,7 @@ fun LucentVideo(
     var playing by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf(false) }
+    var hdrVideo by remember(player) { mutableStateOf(false) }
     var position by remember { mutableLongStateOf(0) }
     var duration by remember { mutableLongStateOf(0) }
     var speed by remember { mutableFloatStateOf(initialSpeed) }
@@ -116,6 +120,7 @@ fun LucentVideo(
     val initialBrightness = remember { activity?.window?.attributes?.screenBrightness ?: -1f }
     LaunchedEffect(valid) {
         quality = quality.coerceIn(valid.indices)
+        hdrVideo = false
         player.setMediaItem(MediaItem.fromUri(valid[quality].uri))
         player.prepare()
         player.playWhenReady = autoplay
@@ -125,8 +130,17 @@ fun LucentVideo(
         player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
     DisposableEffect(player, lifecycle) {
+        fun updateHdrMetadata() {
+            val format = player.videoFormat ?: return
+            val detected = isHdrVideoTransfer(format.colorInfo?.colorTransfer)
+            hdrVideo = detected
+            onHdrMetadataChanged(detected)
+        }
         val listener =
             object : Player.Listener {
+                override fun onTracksChanged(tracks: Tracks) { updateHdrMetadata() }
+                override fun onVideoSizeChanged(videoSize: VideoSize) { updateHdrMetadata() }
+
                 override fun onIsPlayingChanged(value: Boolean) {
                     playing = value
                 }
@@ -134,6 +148,7 @@ fun LucentVideo(
                 override fun onPlaybackStateChanged(state: Int) {
                     loading = state == Player.STATE_BUFFERING
                     duration = player.duration.coerceAtLeast(0)
+                    updateHdrMetadata()
                 }
 
                 override fun onPlayerError(e: PlaybackException) {
@@ -220,16 +235,22 @@ fun LucentVideo(
     BackHandler(fullscreen) { setFull(false) }
     BoxWithConstraints(modifier.background(Color.Black)) {
         val showChrome = controls && (!fullscreen || (landscape && maxWidth > maxHeight))
-        AndroidView(
-            factory = {
-                (android.view.LayoutInflater.from(it).inflate(R.layout.lucent_video_texture, null, false) as PlayerView).apply {
-                    useController = false
-                    this.player = player
-                    setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+        // TextureView can tone-map HDR into SDR; use SurfaceView only for
+        // verified HDR tracks while keeping the established SDR overlay path.
+        key(hdrVideo) {
+            AndroidView(
+                factory = {
+                    val layout = if (hdrVideo) R.layout.lucent_video_hdr_surface else R.layout.lucent_video_texture
+                    (android.view.LayoutInflater.from(it).inflate(layout, null, false) as PlayerView).apply {
+                        useController = false
+                        this.player = player
+                        setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+                onRelease = { it.player = null },
+            )
+        }
         Box(
             Modifier.fillMaxSize()
                 .pointerInput(player, speed) {
@@ -345,6 +366,13 @@ fun LucentVideo(
                     },
                 )
             }
+        if (showChrome && hdrVideo) {
+            HdrBadge(
+                Modifier.align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = if (fullscreen) 86.dp else 82.dp),
+                description = "HDR 视频",
+            )
+        }
         if (hint.isNotBlank())
             Text(
                 hint,
@@ -397,6 +425,7 @@ fun LucentVideo(
                     val at = player.currentPosition
                     val resume = player.playWhenReady
                     quality = valid.indexOfFirst { it.label == label }.coerceAtLeast(0)
+                    hdrVideo = false
                     player.setMediaItem(MediaItem.fromUri(valid[quality].uri), at)
                     player.prepare()
                     player.playWhenReady = resume

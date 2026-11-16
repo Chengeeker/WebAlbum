@@ -155,6 +155,12 @@ fun AppearancePage(prefs: AlbumPreferences, locked: Boolean, onBack: () -> Unit,
         LucentSection("图库布局") {
             LucentRow("文件夹每行显示数量", "${prefs.folderColumns} 列", Icons.Outlined.Folder, onClick = { open("folderColumns") })
             LucentRow("图片与视频每行显示数量", "${prefs.columns} 列", Icons.Outlined.GridView, onClick = { open("columns") })
+            LucentToggle("显示文件名称", prefs.showMediaNames, prefs::updateShowMediaNames,
+                "图片和视频使用封面 + 文件名卡片；1～3 列生效，4～5 列自动隐藏名称")
+            if (prefs.showMediaNames) {
+                LucentToggle("精简文件名称", prefs.compactMediaNames, prefs::updateCompactMediaNames,
+                    "隐藏常见截图及微信图片前缀和媒体扩展名，仅改变显示内容")
+            }
         }
         LucentSection("显示效果") {
             LucentToggle("使用液态玻璃效果", style.glass, { prefs.updateStyle(style.copy(glass = it)) }, "应用于图片查看器和悬浮操作栏")

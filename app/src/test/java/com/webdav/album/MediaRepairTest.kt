@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Looper
 import android.view.LayoutInflater
 import android.view.TextureView
+import android.view.SurfaceView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.MetadataRetriever
 import androidx.media3.extractor.metadata.mp4.MotionPhotoMetadata
@@ -40,6 +41,12 @@ class MediaRepairTest {
         val player = LayoutInflater.from(context).inflate(dev.chengeeker.lucent.R.layout.lucent_video_texture, null, false)
         assertTrue(player.javaClass.getMethod("getVideoSurfaceView").invoke(player) is TextureView)
     }
+    @Test fun hdrPlayerUsesSurfaceViewWhileOrdinaryPlaybackKeepsTextureView() {
+        val context = RuntimeEnvironment.getApplication() as AlbumApplication
+        val view = LayoutInflater.from(context).inflate(dev.chengeeker.lucent.R.layout.lucent_video_hdr_surface, null, false)
+        assertTrue(view.javaClass.getMethod("getVideoSurfaceView").invoke(view) is SurfaceView)
+    }
+
     private fun motionFixture(): ByteArray {
         val jpeg = requireNotNull(javaClass.getResourceAsStream("/landscape.jpg")).use { it.readBytes() }
         val video = requireNotNull(javaClass.getResourceAsStream("/motion-fixture.mp4")).use { it.readBytes() }

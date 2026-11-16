@@ -147,6 +147,35 @@ class PreferencesAndLockTest {
         assertTrue(prefs.style.translucent)
     }
 
+    @Test fun mediaNameCardPreferencesPersistAndOldBackupRestoresSafely() {
+        val prefs = AlbumPreferences(app)
+        assertFalse(prefs.showMediaNames)
+        assertFalse(prefs.compactMediaNames)
+        prefs.updateShowMediaNames(true)
+        prefs.updateCompactMediaNames(true)
+        val reloaded = AlbumPreferences(app)
+        assertTrue(reloaded.showMediaNames)
+        assertTrue(reloaded.compactMediaNames)
+        val backup = reloaded.exportSettings()
+        assertTrue(org.json.JSONObject(backup).getBoolean("showMediaNames"))
+        assertTrue(org.json.JSONObject(backup).getBoolean("compactMediaNames"))
+        prefs.updateShowMediaNames(false)
+        prefs.updateCompactMediaNames(false)
+        prefs.importSettings(backup)
+        assertTrue(prefs.showMediaNames)
+        assertTrue(prefs.compactMediaNames)
+        val legacy = org.json.JSONObject(backup).apply {
+            remove("showMediaNames")
+            remove("compactMediaNames")
+        }.toString()
+        prefs.importSettings(legacy)
+        assertFalse(prefs.showMediaNames)
+        assertFalse(prefs.compactMediaNames)
+        prefs.updateShowMediaNames(true)
+        prefs.updateColumns(5)
+        assertTrue(prefs.showMediaNames) // 4-5 columns hide labels visually, not persistently
+    }
+
     @Test fun iconSwitchKeepsOneLauncherEnabled() {
         val prefs = AlbumPreferences(app)
         val pm = app.packageManager

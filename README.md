@@ -17,10 +17,12 @@ WebAlbum 的定位是一款轻量的 **WebDAV 媒体浏览与播放应用**，�
 - **图片浏览**：支持常见图片格式，包括 JPEG、PNG、WebP、GIF、BMP、HEIC/HEIF、AVIF 等；提供图片预览、缩放和图库滑动浏览。
 - **视频播放**：基于 AndroidX Media3 / ExoPlayer，支持视频封面、进度控制、播放与暂停、全屏横屏、倍速，以及播放器内的亮度、音量与进度手势。实际可播放格式取决于设备解码能力、文件封装与服务器响应。
 - **动态照片**：对兼容的动态照片（Motion Photo / Live Photo 类媒体）提供识别与播放支持，效果取决于文件格式和设备兼容性。
+- **渐进式预览**：图片先显示已缓存的缩略图，再平滑替换为高清内容；只按需预取少量相邻图片。普通 WebDAV 不一定支持服务器缩略图，首次访问仍可能下载原文件。
+- **HDR 媒体**：Android 14+ 支持检测带增益图的 Ultra HDR 图片；通过视频色彩元数据识别 HLG/PQ，兼容设备使用 HDR 视频渲染路径，并显示对应 HDR 角标。最终效果取决于屏幕、系统及解码器。
 - **按需缓存**：图片封面与预览使用本地缓存；无需预先下载整个远程图库。
 
 ### 图库管理与操作
-- **目录与网格**：按文件夹浏览，图片和视频混排；可调整媒体每行 1～5 列，另可配置文件夹网格。
+- **目录与网格**：按文件夹浏览，图片和视频混排；可调整媒体每行 1～5 列，另可配置文件夹网格。1～3 列可启用文件名卡片，并精简 Screenshot、IMG、VID、微信导出等自动生成的文件名前缀。
 - **快速操作**：下拉刷新，双击顶栏标题回到列表顶部。
 - **排序**：按拍摄时间、文件修改时间或名称排序，支持升序与降序切换，默认按修改时间由近到远。
 - **批量选择**：长按进入多选，保持按住并滑动可扩展选择范围，向回滑动可撤销超出范围的选择；支持批量下载、查看属性及删除。
@@ -38,11 +40,11 @@ WebAlbum 的定位是一款轻量的 **WebDAV 媒体浏览与播放应用**，�
 
 从 [GitHub Releases](https://github.com/Chengeeker/WebAlbum/releases) 下载正式 APK：
 
-**[下载 WebAlbum v1.2.4（arm64-v8a）](https://github.com/Chengeeker/WebAlbum/releases/download/v1.2.4/WebAlbum_v1.2.4_arm64-v8a.apk)**
+**[下载 WebAlbum v1.2.7（arm64-v8a）](https://github.com/Chengeeker/WebAlbum/releases/download/v1.2.7/WebAlbum_v1.2.7_arm64-v8a.apk)**
 
 | 项目 | 要求 |
 | --- | --- |
-| 当前版本 | **1.2.4**（Version Code 10） |
+| 当前版本 | **1.2.7**（Version Code 13） |
 | Android | **8.0（API 26）或以上** |
 | 架构 | **arm64-v8a** |
 | 应用包名 | `com.webdav.album` |
