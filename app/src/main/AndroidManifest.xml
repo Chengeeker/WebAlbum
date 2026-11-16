@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:name=".AlbumApplication" android:label="WebAlbum" android:icon="@drawable/ic_album" android:allowBackup="false" android:usesCleartextTraffic="true" android:theme="@style/Theme.WebAlbum">
+        <activity android:name=".MainActivity" android:exported="true" />
+        <activity-alias android:name=".LauncherDefault" android:targetActivity=".MainActivity" android:enabled="true" android:exported="true" android:icon="@drawable/ic_album"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity-alias>
+        <activity-alias android:name=".LauncherLight" android:targetActivity=".MainActivity" android:enabled="false" android:exported="true" android:icon="@drawable/ic_album_light"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity-alias>
+        <activity-alias android:name=".LauncherDark" android:targetActivity=".MainActivity" android:enabled="false" android:exported="true" android:icon="@drawable/ic_album_dark"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity-alias>
+    </application>
+</manifest>
