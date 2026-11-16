@@ -19,6 +19,7 @@ WebAlbum 的定位是一款轻量的 **WebDAV 媒体浏览与播放应用**，�
 - **动态照片**：对兼容的动态照片（Motion Photo / Live Photo 类媒体）提供识别与播放支持，效果取决于文件格式和设备兼容性。
 - **渐进式预览**：图片先显示已缓存的缩略图，再平滑替换为高清内容；只按需预取少量相邻图片。普通 WebDAV 不一定支持服务器缩略图，首次访问仍可能下载原文件。
 - **HDR 媒体**：Android 14+ 支持检测带增益图的 Ultra HDR 图片；通过视频色彩元数据识别 HLG/PQ，兼容设备使用 HDR 视频渲染路径，并显示对应 HDR 角标。最终效果取决于屏幕、系统及解码器。
+- **原图高清浏览**：查看器新增底部居中的「加载原图」半透明胶囊，可复用或下载完整原始文件并显示进度；放大到约 1.6 倍时按当前视野解码高清区域，不再只是放大低分辨率预览。胶囊与顶部控件共用液态玻璃设置及触觉反馈。已识别的 Ultra HDR 图片暂不叠加可能丢失增益图的普通区域解码层。
 - **按需缓存**：图片封面与预览使用本地缓存；无需预先下载整个远程图库。
 
 ### 图库管理与操作
@@ -40,11 +41,11 @@ WebAlbum 的定位是一款轻量的 **WebDAV 媒体浏览与播放应用**，�
 
 从 [GitHub Releases](https://github.com/Chengeeker/WebAlbum/releases) 下载正式 APK：
 
-**[下载 WebAlbum v1.2.7（arm64-v8a）](https://github.com/Chengeeker/WebAlbum/releases/download/v1.2.7/WebAlbum_v1.2.7_arm64-v8a.apk)**
+**[下载 WebAlbum v1.2.9（arm64-v8a）](https://github.com/Chengeeker/WebAlbum/releases/download/v1.2.9/WebAlbum_v1.2.9_arm64-v8a.apk)**
 
 | 项目 | 要求 |
 | --- | --- |
-| 当前版本 | **1.2.7**（Version Code 13） |
+| 当前版本 | **1.2.9**（Version Code 15） |
 | Android | **8.0（API 26）或以上** |
 | 架构 | **arm64-v8a** |
 | 应用包名 | `com.webdav.album` |
@@ -86,7 +87,7 @@ README.en.md          English documentation
 
 ## 版本状态与限制
 
-v1.2.4 已完成项目内的单元测试与正式签名构建。部分交互功能（如视频全屏、连续多选震动、不同设备的播放兼容性）仍需要在真实 Android 设备及 WebDAV 服务上进一步验证；欢迎通过 [Issues](https://github.com/Chengeeker/WebAlbum/issues) 提交复现步骤和问题反馈。
+v1.2.9 已通过正式签名构建与 84 项主机端单元测试（0 失败）。原图区域解码、液态玻璃胶囊和 HDR 在不同设备上的实际视觉效果仍需真机验证；欢迎通过 [Issues](https://github.com/Chengeeker/WebAlbum/issues) 提交复现步骤与问题反馈。
 
 ## 开源与致谢
 

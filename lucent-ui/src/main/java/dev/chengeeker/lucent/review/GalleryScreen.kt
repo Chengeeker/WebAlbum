@@ -87,7 +87,8 @@ private val galleryCurve = CubicBezierEasing(.215f, .61f, .355f, 1f)
 
 @Composable
 fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, GalleryOrigin> = emptyMap(), onClose: () -> Unit, saving: Boolean = false,
-    resolveMotion: (suspend (GalleryMedia) -> String?)? = null, onSave: (GalleryMedia) -> Unit) {
+    resolveMotion: (suspend (GalleryMedia) -> String?)? = null, originalLoader: GalleryOriginalLoader? = null,
+    onSave: (GalleryMedia) -> Unit) {
     require(media.isNotEmpty())
     val initial = start.coerceIn(media.indices)
     val pager = rememberPagerState(initial) { media.size }
@@ -144,6 +145,7 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
         var dragFraction by remember(pager.currentPage) { mutableFloatStateOf(0f) }
 
         var showControls by remember { mutableStateOf(true) }
+        var currentOriginalState by remember { mutableStateOf<GalleryHiResState?>(null) }
         var playingMotion by remember(item.url) { mutableStateOf(false) }
         var motionError by remember(item.url) { mutableStateOf(false) }
         val liveUrl by produceState<String?>(null, item.url, resolveMotion, pager.settledPage) {
@@ -251,6 +253,11 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
                     val firstBitmap = remember(page) { if (page == initial) openingImage else sources[page]?.bitmap }
                     var scale by remember(page) { mutableFloatStateOf(1f) }
                     var pan by remember(page) { mutableStateOf(Offset.Zero) }
+                    val highRes = rememberGalleryHiResState(picture.url)
+                    SideEffect {
+                        if (page == pager.currentPage && currentOriginalState !== highRes)
+                            currentOriginalState = highRes
+                    }
                     var displayedBitmap by remember(page) { mutableStateOf(firstBitmap) }
                     var fullImageReady by remember(page, picture.url) { mutableStateOf(false) }
                     var zoomAnimation by remember(page) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
@@ -311,6 +318,10 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
                             Box(Modifier.fillMaxSize().graphicsLayer { scaleX = scale; scaleY = scale; translationX = pan.x; translationY = pan.y + dragY }, contentAlignment = Alignment.Center) {
                                 OriginalImage(picture, Modifier.fillMaxSize(), previewBitmap = firstBitmap,
                                     onBitmap = { displayedBitmap = it; fullImageReady = true }, showImage = !morphing)
+                                GalleryHighResolutionLayer(picture, highRes, scale, pan, Size(width, height),
+                                    originalLoader = originalLoader,
+                                    preserveHdr = picture.hdr || GalleryHdrRegistry.observeHdr(picture.url),
+                                    active = page == pager.currentPage && !morphing && !closing)
                                 if (page == pager.currentPage && liveUrl != null && !closing && !morphing)
                                     LivePhotoLayer(liveUrl!!, playingMotion, onError = { playingMotion = false; motionError = true },
                                         onStopped = { playingMotion = false }, modifier = Modifier.fillMaxSize())
@@ -353,6 +364,22 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
             if (chrome && hasHdr && item.video.isBlank()) HdrBadge(Modifier.align(Alignment.BottomEnd).windowInsetsPadding(bottomInsets)
                 .padding(end = 16.dp, bottom = if (media.size > 1) 110.dp else 24.dp))
             if (motionError && chrome) Text("动态照片播放失败", Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .7f), RoundedCornerShape(12.dp)).padding(12.dp), color = Color.White)
+            // The original-file action follows the same glass preference as the top buttons.
+            // Center it just above the 64dp filmstrip (or above the bottom inset when alone).
+            if (chrome && item.video.isBlank()) {
+                val highResState = currentOriginalState?.takeIf { it.url == item.url }
+                val stripVisible = media.size > 1 && !(landscape && videoThumbnail)
+                val stripBottom = if (videoThumbnail && videoControlsHeight > 0)
+                    with(density) { videoControlsHeight.toDp() } + 8.dp else 32.dp
+                Box(
+                    Modifier.align(Alignment.BottomCenter)
+                        .windowInsetsPadding(bottomInsets)
+                        .padding(bottom = galleryOriginalPillBottomMargin(stripVisible, stripBottom)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    GalleryOriginalPill(highResState, hasHdr)
+                }
+            }
             if (chrome && media.size > 1 && !(landscape && videoThumbnail)) GalleryThumbnails(media, pager,
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().windowInsetsPadding(bottomInsets)
                     .padding(start = 12.dp, end = 12.dp, bottom = if (videoThumbnail && videoControlsHeight > 0)

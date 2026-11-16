@@ -47,6 +47,7 @@ import dev.chengeeker.lucent.review.GalleryMedia
 import dev.chengeeker.lucent.review.GalleryOrigin
 import dev.chengeeker.lucent.review.PageStack
 import dev.chengeeker.lucent.review.ReviewGallery
+import dev.chengeeker.lucent.review.GalleryOriginalLoader
 import dev.chengeeker.lucent.review.ReviewRoute
 import dev.chengeeker.lucent.review.ReviewBottomBar
 import dev.chengeeker.lucent.review.ReviewHapticKind
@@ -94,6 +95,13 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
     val videoFactory = remember(app) { androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okhttp3.Call.Factory { app.client.newCall(it) }) }
     val motionDetector = remember(context) { MotionPhotoDetector(context) }
     val resolveMotion: suspend (GalleryMedia) -> String? = remember(motionDetector) { { motionDetector.find(it) } }
+    val originalLoader: GalleryOriginalLoader? = remember(app, connection) {
+        connection?.let { config ->
+            val originStore = WebDavGalleryOriginalLoader(context, app, config)
+            val load: GalleryOriginalLoader = { item, report -> originStore.obtain(item, report) }
+            load
+        }
+    }
     LaunchedEffect(folders) { selecting = false; selected.clear(); captureTimes = emptyMap() }
     LaunchedEffect(connection, entries, prefs.sortMode) {
         val current = connection
@@ -172,7 +180,12 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
             if (threshold > 0) try {
                 withContext(Dispatchers.IO) {
                     val cache = Coil.imageLoader(context).diskCache
-                    if (cache != null && cache.size > threshold.toLong() * 1024 * 1024) cache.clear()
+                    val originalDir = context.cacheDir.resolve("gallery-originals")
+                    val originalBytes = originalDir.listFiles()?.sumOf { if (it.isFile) it.length() else 0L } ?: 0L
+                    if ((cache?.size ?: 0L) + originalBytes > threshold.toLong() * 1024 * 1024) {
+                        cache?.clear()
+                        originalDir.deleteRecursively()
+                    }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { message = "启动时清理缓存失败，已保留现有缓存。" }
@@ -274,7 +287,9 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                 "backup" -> SettingsBackupPage(prefs, locked, ::back) { message = it }
                 "cache" -> CacheSettingsPage(prefs, locked, ::back) { finished ->
                     scope.launch {
-                        val result = runCatching { withContext(Dispatchers.IO) { Coil.imageLoader(context).diskCache?.clear(); Coil.imageLoader(context).memoryCache?.clear() } }
+                        val result = runCatching { withContext(Dispatchers.IO) { Coil.imageLoader(context).diskCache?.clear()
+                            Coil.imageLoader(context).memoryCache?.clear()
+                            context.cacheDir.resolve("gallery-originals").deleteRecursively() } }
                         message = result.fold({ "图片缓存已清理" }, { "清理失败，请稍后重试" })
                         finished(result.isSuccess)
                         if (result.isSuccess) load(folders)
@@ -308,7 +323,8 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
         }
     gallery?.takeIf { !locked }?.let { (media, index) ->
             CompositionLocalProvider(LocalVideoDataSource provides videoFactory) {
-                ReviewGallery(media, index, origins, onClose = { gallery = null }, saving = saving, resolveMotion = resolveMotion, onSave = { item ->
+                ReviewGallery(media, index, origins, onClose = { gallery = null }, saving = saving,
+                    resolveMotion = resolveMotion, originalLoader = originalLoader, onSave = { item ->
                     val entry = entries.firstOrNull { it.url == (item.video.ifBlank { item.url }).substringBefore('#') }
                     if (entry != null && prefs.downloadTree.isNotBlank()) download(listOf(entry))
                     else { pending = item; save.launch(item.description.ifBlank { "image.jpg" }) }

@@ -222,10 +222,15 @@ fun CacheSettingsPage(prefs: AlbumPreferences, locked: Boolean, onBack: () -> Un
     var bytes by remember { mutableLongStateOf(0) }
     var confirm by remember { mutableStateOf(false) }
     var threshold by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { bytes = withContext(Dispatchers.IO) { coil.Coil.imageLoader(context).diskCache?.size ?: 0L } }
+    LaunchedEffect(Unit) { bytes = withContext(Dispatchers.IO) {
+        val coilBytes = coil.Coil.imageLoader(context).diskCache?.size ?: 0L
+        val originals = context.cacheDir.resolve("gallery-originals").listFiles()
+            ?.sumOf { if (it.isFile) it.length() else 0L } ?: 0L
+        coilBytes + originals
+    } }
     SettingsScaffold("缓存管理", onBack) {
         LucentSection("图片缓存") {
-            LucentRow("当前占用", "${bytes / 1024 / 1024} MiB，上限 1280 MiB", Icons.Outlined.FolderOpen)
+            LucentRow("当前占用", "${bytes / 1024 / 1024} MiB，含原图缓存", Icons.Outlined.FolderOpen)
             LucentRow("清理图片缓存", "不删除服务器文件和已下载的图片", Icons.Outlined.DeleteSweep, onClick = { confirm = true })
             LucentRow("启动时自动清理阈值", if (prefs.cacheThreshold == 0) "关闭" else "${prefs.cacheThreshold} MiB", onClick = { threshold = true })
         }

@@ -19,6 +19,7 @@ The app uses **Material Design 3** and UI components from my [**LucentUI**](http
 - **Motion photos:** Recognition/playback for compatible motion-photo media, depending on file format and device.
 - **Progressive previews:** Show cached thumbnails first, then fade in the full-resolution image, prefetching only nearby pictures. Plain WebDAV may not provide server-generated thumbnails, so initial requests can still fetch source files.
 - **HDR media:** Detect Ultra HDR images with gain maps on Android 14+, and HLG/PQ video via actual color metadata. HDR badges and a more suitable video output path are used on compatible devices; results depend on the display, platform, and decoder.
+- **Original-resolution viewing:** A centered translucent capsule above the gallery filmstrip can cache or download the full source file with progress. Zooming past roughly 1.6× triggers region-based decoding of visible source pixels instead of stretching a small preview. The capsule follows the existing liquid-glass and haptics settings. Ultra HDR gainmap images conservatively retain the color-correct preview rather than using SDR region tiles.
 - **On-demand image caching:** Load thumbnails and previews without downloading the full remote library.
 
 ### Gallery and file operations
@@ -40,11 +41,11 @@ The app uses **Material Design 3** and UI components from my [**LucentUI**](http
 
 Download a signed APK from [GitHub Releases](https://github.com/Chengeeker/WebAlbum/releases).
 
-**[Download WebAlbum v1.2.7 (arm64-v8a)](https://github.com/Chengeeker/WebAlbum/releases/download/v1.2.7/WebAlbum_v1.2.7_arm64-v8a.apk)**
+**[Download WebAlbum v1.2.9 (arm64-v8a)](https://github.com/Chengeeker/WebAlbum/releases/download/v1.2.9/WebAlbum_v1.2.9_arm64-v8a.apk)**
 
 | Item | Requirement |
 | --- | --- |
-| Current version | **1.2.7** (version code 13) |
+| Current version | **1.2.9** (version code 15) |
 | Android | **8.0 / API 26 or later** |
 | CPU architecture | **arm64-v8a** |
 | Application ID | `com.webdav.album` |
@@ -86,7 +87,7 @@ README.md             Chinese documentation (default)
 
 ## Current status
 
-Version 1.2.4 passes the local unit test suite and signed Release build. Some interactions (fullscreen playback, continuous selection haptics, device/codec compatibility) still need testing on real Android devices and WebDAV servers. Please share reproducible issues through [GitHub Issues](https://github.com/Chengeeker/WebAlbum/issues).
+Version 1.2.9 passes a signed Release build and 84 host-side unit tests (0 failures). High-resolution region decoding, the liquid-glass capsule, and HDR behavior still need real-device validation on different Android devices. Please share reproducible issues through [GitHub Issues](https://github.com/Chengeeker/WebAlbum/issues).
 
 ## License and credits
 
