@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id(
 android {
     namespace = "com.webdav.album"
     compileSdk { version = release(37) { minorApiLevel = 2 } }
-    defaultConfig { applicationId = "com.webdav.album"; minSdk = 26; targetSdk = 36; versionCode = 15; versionName = "1.2.9"; ndk { abiFilters += "arm64-v8a" } }
+    defaultConfig { applicationId = "com.webdav.album"; minSdk = 26; targetSdk = 36; versionCode = 18; versionName = "1.3.2"; ndk { abiFilters += "arm64-v8a" } }
     signingConfigs { create("release") { storeFile = file(providers.environmentVariable("WEBALBUM_KEYSTORE").getOrElse("missing.p12")); storePassword = providers.environmentVariable("WEBALBUM_KEY_PASSWORD").orNull; keyAlias = "infinitycm"; keyPassword = providers.environmentVariable("WEBALBUM_KEY_PASSWORD").orNull; storeType = "PKCS12" } }
     buildTypes { release { signingConfig = signingConfigs.getByName("release"); isMinifyEnabled = true; isShrinkResources = true; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -20,6 +20,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.media3:media3-datasource-okhttp:1.9.2")
     implementation("androidx.media3:media3-exoplayer:1.9.2")
+    implementation("androidx.media3:media3-session:1.9.2")
+    implementation("com.google.android.material:material:1.14.0") // GreenMusic artwork tonal-spot palette
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("io.coil-kt:coil-gif:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")

@@ -1,12 +1,12 @@
 # WebAlbum
 
-**面向 WebDAV 的 Android 图片与视频浏览播放器。** 直接连接自己的 WebDAV 服务器，按文件夹浏览照片与视频，在手机上预览、播放和管理远程媒体。
+**面向 WebDAV 的 Android 图片、视频与音乐浏览播放器。** 连接自己的 WebDAV 服务器，按文件夹浏览照片、视频和音乐，在手机上预览、播放和管理远程媒体。
 
 [简体中文](README.md) · [English](README.en.md) · [下载最新发行版](https://github.com/Chengeeker/WebAlbum/releases/latest) · [LucentUI](https://github.com/Chengeeker/LucentUI)
 
 ## 项目介绍
 
-WebAlbum 的定位是一款轻量的 **WebDAV 媒体浏览与播放应用**，不是网盘服务端，也不需要将整个相册同步到手机后才能查看。连接 WebDAV 地址后，可以直接查看目录中的图片、视频，并根据需要下载到本地。
+WebAlbum 的定位是一款轻量的 **WebDAV 媒体浏览与播放应用**，不是网盘服务端，也不需要将整个相册同步到手机后才能查看。连接 WebDAV 地址后，可以直接查看目录中的图片、视频和音乐，并根据需要下载到本地。
 
 界面基于 **Material Design 3**，并引用我开发的 [**LucentUI**](https://github.com/Chengeeker/LucentUI) 组件与设计实现。本仓库内的 `lucent-ui` 模块包含实际使用的 UI 代码；部分组件也沿用了 [Review](https://github.com/Chengeeker/Review) 的设计思路。相关授权与第三方声明请见 [NOTICE.md](NOTICE.md)。
 
@@ -21,6 +21,14 @@ WebAlbum 的定位是一款轻量的 **WebDAV 媒体浏览与播放应用**，�
 - **HDR 媒体**：Android 14+ 支持检测带增益图的 Ultra HDR 图片；通过视频色彩元数据识别 HLG/PQ，兼容设备使用 HDR 视频渲染路径，并显示对应 HDR 角标。最终效果取决于屏幕、系统及解码器。
 - **原图高清浏览**：查看器新增底部居中的「加载原图」半透明胶囊，可复用或下载完整原始文件并显示进度；放大到约 1.6 倍时按当前视野解码高清区域，不再只是放大低分辨率预览。胶囊与顶部控件共用液态玻璃设置及触觉反馈。已识别的 Ultra HDR 图片暂不叠加可能丢失增益图的普通区域解码层。
 - **按需缓存**：图片封面与预览使用本地缓存；无需预先下载整个远程图库。
+
+### 音乐播放（1.3.2 新增）
+- **WebDAV 音乐识别**：识别 MP3、FLAC、M4A、AAC、OGG、OPUS、WAV 等常见扩展名；实际解码取决于设备与服务器，同目录歌曲组成播放队列。
+- **GreenMusic 风格播放器**：复用自有项目 [GreenMusic](https://github.com/Chengeeker/GreenMusic) 的交互设计，适配迷你播放器、全屏专辑图、歌词视图、队列、渐变背景及动画。
+- **连续可打断动画**：播放器收起过程中可以点击迷你播放器，从当前共享封面、标题位置反向展开；收起时快速淡出非核心控件。
+- **歌词与音频元信息**：支持同目录 LRC、MP3 ID3 USLT/TXXX、FLAC Vorbis Comment 歌词；无时间戳显示普通文本。M4A 内嵌歌词尚未完整适配。音乐列表可提前显示可识别的内嵌封面和歌手信息。
+- **后台播放**：Media3 MediaSessionService，支持系统通知及媒体控制；Android 13+ 根据系统要求申请通知权限。实际后台行为受设备限制。
+- **相邻歌曲预加载**：默认预读上一首与下一首各约 768 KiB，减少 WebDAV 切歌等待；可在音乐设置中关闭。支持随机、循环、倍速及歌词显示设置。
 
 ### 图库管理与操作
 - **目录与网格**：按文件夹浏览，图片和视频混排；可调整媒体每行 1～5 列，另可配置文件夹网格。1～3 列可启用文件名卡片，并精简 Screenshot、IMG、VID、微信导出等自动生成的文件名前缀。
@@ -41,11 +49,11 @@ WebAlbum 的定位是一款轻量的 **WebDAV 媒体浏览与播放应用**，�
 
 从 [GitHub Releases](https://github.com/Chengeeker/WebAlbum/releases) 下载正式 APK：
 
-**[下载 WebAlbum v1.2.9（arm64-v8a）](https://github.com/Chengeeker/WebAlbum/releases/download/v1.2.9/WebAlbum_v1.2.9_arm64-v8a.apk)**
+**[下载 WebAlbum v1.3.2（arm64-v8a）](https://github.com/Chengeeker/WebAlbum/releases/download/v1.3.2/WebAlbum_v1.3.2_arm64-v8a.apk)**
 
 | 项目 | 要求 |
 | --- | --- |
-| 当前版本 | **1.2.9**（Version Code 15） |
+| 当前版本 | **1.3.2**（Version Code 18） |
 | Android | **8.0（API 26）或以上** |
 | 架构 | **arm64-v8a** |
 | 应用包名 | `com.webdav.album` |
@@ -57,7 +65,7 @@ WebAlbum 的定位是一款轻量的 **WebDAV 媒体浏览与播放应用**，�
 
 1. 安装 APK，打开 WebAlbum。
 2. 输入 WebDAV 服务器地址、用户名和密码，连接成功后进入文件夹浏览。
-3. 点击图片或视频进行预览；通过顶部的列数按钮和「更多」菜单调整布局、排序及选择模式。
+3. 点击图片或视频进行预览，点击音乐文件即可播放；通过顶部的列数按钮和「更多」菜单调整布局、排序及选择模式。
 4. 长按媒体执行多选，通过下方操作栏下载、查看属性或删除；更多设置位于「更多 → 设置」。
 
 **注意：删除操作会直接删除 WebDAV 服务器上的对应文件，通常不可撤销。** 建议提前备份重要媒体。部分视频拖动进度需要服务器支持 HTTP Range 请求，播放与解码兼容性也可能因设备不同而变化。
@@ -87,8 +95,8 @@ README.en.md          English documentation
 
 ## 版本状态与限制
 
-v1.2.9 已通过正式签名构建与 84 项主机端单元测试（0 失败）。原图区域解码、液态玻璃胶囊和 HDR 在不同设备上的实际视觉效果仍需真机验证；欢迎通过 [Issues](https://github.com/Chengeeker/WebAlbum/issues) 提交复现步骤与问题反馈。
+v1.3.2 已通过正式签名构建与 103 项主机端单元测试（0 失败）。音乐播放器的连续反向动画、后台通知、蓝牙控制及真实 WebDAV 切歌速度仍需真机验证；M4A 内嵌歌词也有未支持的格式。欢迎通过 [Issues](https://github.com/Chengeeker/WebAlbum/issues) 反馈。
 
 ## 开源与致谢
 
-WebAlbum 以 [MIT License](LICENSE) 开源。UI 来源与设计参考包括 [LucentUI](https://github.com/Chengeeker/LucentUI) 和 [Review](https://github.com/Chengeeker/Review)；其他依赖及相关许可证信息见 [NOTICE.md](NOTICE.md) 和 `lucent-ui/src/main/assets/licenses/`。
+WebAlbum 以 [MIT License](LICENSE) 开源。UI 来源与设计参考包括 [LucentUI](https://github.com/Chengeeker/LucentUI)、[Review](https://github.com/Chengeeker/Review) 和自有项目 [GreenMusic](https://github.com/Chengeeker/GreenMusic)；其他依赖及相关许可证信息见 [NOTICE.md](NOTICE.md) 和 `lucent-ui/src/main/assets/licenses/`。

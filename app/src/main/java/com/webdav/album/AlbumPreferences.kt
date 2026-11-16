@@ -36,6 +36,22 @@ class AlbumPreferences(context: Context) {
         private set
     var compactMediaNames by mutableStateOf(prefs.getBoolean("compactMediaNames", false))
         private set
+    var musicMiniPlayer by mutableStateOf(prefs.getBoolean("musicMiniPlayer", true))
+        private set
+    var musicKeepBackground by mutableStateOf(prefs.getBoolean("musicKeepBackground", true))
+        private set
+    var musicPreloadEnabled by mutableStateOf(prefs.getBoolean("musicPreloadEnabled", true))
+        private set
+    var musicLyricsFontSize by mutableIntStateOf(prefs.getInt("musicLyricsFontSize", 24).coerceIn(16, 40))
+        private set
+    var musicLyricsWeight by mutableIntStateOf(prefs.getInt("musicLyricsWeight", 600).coerceIn(100, 900))
+        private set
+    var musicLyricsCenter by mutableStateOf(prefs.getBoolean("musicLyricsCenter", true))
+        private set
+    var musicLyricsBlur by mutableStateOf(prefs.getBoolean("musicLyricsBlur", true))
+        private set
+    var musicLyricsStagger by mutableStateOf(prefs.getBoolean("musicLyricsStagger", true))
+        private set
     var sortMode by mutableStateOf(AlbumSort.from(prefs.getString("sortMode", "modified")))
         private set
     var sortDescending by mutableStateOf(prefs.getBoolean("sortDescending", true))
@@ -67,6 +83,14 @@ class AlbumPreferences(context: Context) {
     fun updateFolderColumns(value: Int) { val v = value.coerceIn(1, 5); check(prefs.edit().putInt("folderColumns", v).commit()); folderColumns = v }
     fun updateShowMediaNames(value: Boolean) { check(prefs.edit().putBoolean("showMediaNames", value).commit()); showMediaNames = value }
     fun updateCompactMediaNames(value: Boolean) { check(prefs.edit().putBoolean("compactMediaNames", value).commit()); compactMediaNames = value }
+    fun updateMusicMiniPlayer(value: Boolean) { check(prefs.edit().putBoolean("musicMiniPlayer", value).commit()); musicMiniPlayer = value }
+    fun updateMusicKeepBackground(value: Boolean) { check(prefs.edit().putBoolean("musicKeepBackground", value).commit()); musicKeepBackground = value }
+    fun updateMusicPreloadEnabled(value: Boolean) { check(prefs.edit().putBoolean("musicPreloadEnabled", value).commit()); musicPreloadEnabled = value }
+    fun updateMusicLyricsFontSize(value: Int) { val n = value.coerceIn(16, 40); check(prefs.edit().putInt("musicLyricsFontSize", n).commit()); musicLyricsFontSize = n }
+    fun updateMusicLyricsWeight(value: Int) { val n = value.coerceIn(100, 900); check(prefs.edit().putInt("musicLyricsWeight", n).commit()); musicLyricsWeight = n }
+    fun updateMusicLyricsCenter(value: Boolean) { check(prefs.edit().putBoolean("musicLyricsCenter", value).commit()); musicLyricsCenter = value }
+    fun updateMusicLyricsBlur(value: Boolean) { check(prefs.edit().putBoolean("musicLyricsBlur", value).commit()); musicLyricsBlur = value }
+    fun updateMusicLyricsStagger(value: Boolean) { check(prefs.edit().putBoolean("musicLyricsStagger", value).commit()); musicLyricsStagger = value }
     fun updateSort(mode: AlbumSort) {
         val reverse = if (sortMode == mode) !sortDescending else true
         check(prefs.edit().putString("sortMode", mode.key).putBoolean("sortDescending", reverse).commit())
@@ -87,7 +111,12 @@ class AlbumPreferences(context: Context) {
         .put("seed", style.seed).put("black", style.black).put("font", style.font.toDouble()).put("weight", style.weight)
         .put("weightCustom", style.customWeight).put("glass", style.glass).put("translucent", style.translucent).put("motion", style.motion).put("haptics", style.haptics)
         .put("columns", columns).put("folderColumns", folderColumns).put("showMediaNames", showMediaNames).put("compactMediaNames", compactMediaNames).put("sortMode", sortMode.key).put("sortDescending", sortDescending).put("predictive", predictive).put("privacy", privacy).put("refresh", refresh)
-        .put("cacheThreshold", cacheThreshold).toString(2)
+        .put("cacheThreshold", cacheThreshold)
+        .put("musicMiniPlayer", musicMiniPlayer).put("musicKeepBackground", musicKeepBackground)
+        .put("musicPreloadEnabled", musicPreloadEnabled)
+        .put("musicLyricsFontSize", musicLyricsFontSize).put("musicLyricsWeight", musicLyricsWeight)
+        .put("musicLyricsCenter", musicLyricsCenter).put("musicLyricsBlur", musicLyricsBlur)
+        .put("musicLyricsStagger", musicLyricsStagger).toString(2)
 
     fun importSettings(text: String) {
         val json = JSONObject(text)
@@ -102,6 +131,14 @@ class AlbumPreferences(context: Context) {
         val newDescending = json.optBoolean("sortDescending", true)
         val newShowNames = json.optBoolean("showMediaNames", false)
         val newCompactNames = json.optBoolean("compactMediaNames", false)
+        val newMusicMini = json.optBoolean("musicMiniPlayer", true)
+        val newMusicBackground = json.optBoolean("musicKeepBackground", true)
+        val newMusicPreload = json.optBoolean("musicPreloadEnabled", true)
+        val newLyricSize = json.optInt("musicLyricsFontSize", 24).coerceIn(16, 40)
+        val newLyricWeight = json.optInt("musicLyricsWeight", 600).coerceIn(100, 900)
+        val newLyricCenter = json.optBoolean("musicLyricsCenter", true)
+        val newLyricBlur = json.optBoolean("musicLyricsBlur", true)
+        val newLyricStagger = json.optBoolean("musicLyricsStagger", true)
         require(value.mode in listOf("system", "light", "dark") && value.seed in 0..7 && value.font.isFinite() && value.font in .85f..1.5f &&
             value.weight in -3..3 && newColumns in 1..5 && newFolderColumns in 1..5 && newRefresh in 0..240 && newThreshold in listOf(0, 16, 64, 256, 512, 1024))
         check(prefs.edit().putString("mode", value.mode).putBoolean("dynamic", value.dynamic).putInt("seed", value.seed)
@@ -109,11 +146,21 @@ class AlbumPreferences(context: Context) {
             .putBoolean("glass", value.glass).putBoolean("translucent", value.translucent).putBoolean("motion", value.motion).putBoolean("haptics", value.haptics)
             .putInt("columns", newColumns).putInt("folderColumns", newFolderColumns)
             .putBoolean("showMediaNames", newShowNames).putBoolean("compactMediaNames", newCompactNames)
+            .putBoolean("musicMiniPlayer", newMusicMini).putBoolean("musicKeepBackground", newMusicBackground)
+            .putBoolean("musicPreloadEnabled", newMusicPreload)
+            .putInt("musicLyricsFontSize", newLyricSize).putInt("musicLyricsWeight", newLyricWeight)
+            .putBoolean("musicLyricsCenter", newLyricCenter).putBoolean("musicLyricsBlur", newLyricBlur)
+            .putBoolean("musicLyricsStagger", newLyricStagger)
             .putString("sortMode", newSort.key).putBoolean("sortDescending", newDescending)
             .putBoolean("predictive", newPredictive).putBoolean("privacy", newPrivacy)
             .putInt("refresh", newRefresh).putInt("cacheThreshold", newThreshold).commit())
         style = value; columns = newColumns; folderColumns = newFolderColumns
         showMediaNames = newShowNames; compactMediaNames = newCompactNames
+        musicMiniPlayer = newMusicMini; musicKeepBackground = newMusicBackground
+        musicPreloadEnabled = newMusicPreload
+        musicLyricsFontSize = newLyricSize; musicLyricsWeight = newLyricWeight
+        musicLyricsCenter = newLyricCenter; musicLyricsBlur = newLyricBlur
+        musicLyricsStagger = newLyricStagger
         sortMode = newSort; sortDescending = newDescending; predictive = newPredictive; privacy = newPrivacy; refresh = newRefresh; cacheThreshold = newThreshold
     }
     fun setIcon(context: Context, value: Int) {

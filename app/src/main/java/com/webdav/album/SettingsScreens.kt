@@ -51,11 +51,15 @@ fun SettingsHome(prefs: AlbumPreferences, connection: Connection?, lock: AppLock
     val revision = lock.revision
     SettingsScaffold("设置", onBack) {
         LucentSection("偏好与功能") { LucentRow("个性化", "主题、字体与图库布局", Icons.Outlined.Palette, onClick = { open("appearance") }) }
+        LucentSection("音乐播放") {
+            LucentRow("音乐播放器", "GreenMusic 风格播放器、迷你播放器、队列与内嵌歌词",
+                Icons.Outlined.LibraryMusic, onClick = { open("musicSettings") })
+        }
         LucentSection("存储与连接") {
             LucentRow("WebDAV 连接", connection?.root?.host ?: "尚未连接", Icons.Outlined.Cloud, onClick = { open("connection") })
             LucentRow("默认打开文件夹", connection?.let { prefs.defaultFolder(it)?.let(::folderName) ?: "WebDAV 根目录" } ?: "请先连接 WebDAV",
                 Icons.Outlined.FolderOpen, enabled = connection != null, onClick = { open("folder") })
-            LucentRow("存储设置", "选择图片与视频保存位置", Icons.Outlined.Download, onClick = { open("storage") })
+            LucentRow("存储设置", "选择图片、视频与音乐保存位置", Icons.Outlined.Download, onClick = { open("storage") })
             LucentRow("缓存管理", "查看和清理临时图片", Icons.Outlined.CleaningServices, onClick = { open("cache") })
             LucentRow("本地备份与迁移", "导出或恢复非敏感设置", Icons.Outlined.Save, onClick = { open("backup") })
             LucentRow("网络设置", "超时与代理", Icons.Outlined.Wifi, onClick = { open("network") })

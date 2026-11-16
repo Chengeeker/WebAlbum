@@ -1,6 +1,10 @@
 package com.webdav.album
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -73,6 +77,21 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
     val snapshots = remember { mutableStateMapOf<String, List<DavItem>>() }
     var loading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    val music = remember(app) { app.music }
+    val musicState by music.state.collectAsState()
+    var musicExpanded by remember { mutableStateOf(false) }
+    val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) message = "未获得通知权限，系统可能不会显示音乐通知；可在系统设置中重新授权。"
+    }
+    fun requestMusicNotification() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+    LaunchedEffect(connection) {
+        music.onConnectionChanged(connection)
+        if (connection != null) music.connect()
+    }
     var gallery by remember { mutableStateOf<Pair<List<GalleryMedia>, Int>?>(null) }
     var origins by remember { mutableStateOf<Map<Int, GalleryOrigin>>(emptyMap()) }
     var pending by remember { mutableStateOf<GalleryMedia?>(null) }
@@ -251,7 +270,8 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                             if (connection == next) load(home(next), fallback = true)
                         }
                     }
-                    else BrowsePage(config, folders, snapshots, prefs.columns, prefs.folderColumns, prefs.showMediaNames, prefs.compactMediaNames, prefs.sortMode, prefs.sortDescending, captureTimes, loading, folderError, selecting, selected,
+                    else BrowsePage(config, folders, snapshots, prefs.columns, prefs.folderColumns, prefs.showMediaNames, prefs.compactMediaNames,
+                        musicState.current != null && prefs.musicMiniPlayer, music, prefs.sortMode, prefs.sortDescending, captureTimes, loading, folderError, selecting, selected,
                         onBack = { load(folders.dropLast(1)) }, onFolder = { load(folders + it.url) },
                         onRefresh = { cancelPrefetch(); folderCache.clear(); load(folders, force = true) }, onSettings = { open("settings") },
                         onSelection = { item -> selecting = true; if (item.url in selected) selected.remove(item.url) else selected.add(item.url) },
@@ -268,14 +288,25 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                                 selected.addAll(updated)
                             }
                         },
-                        onSelectAll = { selected.clear(); selected.addAll(entries.filter { it.image || it.video }.map { it.url }) },
+                        onSelectAll = { selected.clear(); selected.addAll(entries.filter { it.image || it.video || it.audio }.map { it.url }) },
                         onAction = { action ->
                             val items = entries.filter { it.url in selected }
                             if (!loading && !saving && items.isNotEmpty()) when (action) { 0 -> download(items); 1 -> properties = items; 2 -> confirmDelete = true }
                         },
-                        onGallery = { media, index, source -> origins = source; gallery = media to index })
+                        onGallery = { media, index, source -> origins = source; gallery = media to index },
+                        onAudio = { tracks, index ->
+                            val activeConnection = connection
+                            if (activeConnection != null && !locked) {
+                                requestMusicNotification()
+                                scope.launch {
+                                    try { music.playQueue(tracks, index, activeConnection) }
+                                    catch (error: Exception) { message = error.message ?: "播放失败，请检查音频格式或 WebDAV 连接" }
+                                }
+                            }
+                        })
                 }
                 "settings" -> SettingsHome(prefs, connection, lock, ::back, ::open)
+                "musicSettings" -> MusicSettingsPage(prefs, ::back, ::requestMusicNotification)
                 "appearance" -> AppearancePage(prefs, locked, ::back, ::open)
                 "columns" -> ColumnsPage(prefs, false, ::back)
                 "folderColumns" -> ColumnsPage(prefs, true, ::back)
@@ -321,6 +352,13 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                 }
             }
         }
+        GreenMusicPlayerTransition(
+            music = music, prefs = prefs, expanded = musicExpanded,
+            available = !locked && gallery == null,
+            onExpand = { musicExpanded = true },
+            onCollapse = { musicExpanded = false },
+            modifier = Modifier.fillMaxSize(),
+        )
     gallery?.takeIf { !locked }?.let { (media, index) ->
             CompositionLocalProvider(LocalVideoDataSource provides videoFactory) {
                 ReviewGallery(media, index, origins, onClose = { gallery = null }, saving = saving,
@@ -378,15 +416,17 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
         }) { Text("删除") } }, dismissButton = { TextButton(onClick = hapticClick { confirmDelete = false }) { Text("取消") } })
 }
 
-@OptIn(ExperimentalAnimationApi::class)
+@OptIn(ExperimentalAnimationApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map<String, List<DavItem>>, columns: Int, folderColumns: Int,
-    showMediaNames: Boolean, compactMediaNames: Boolean, sortMode: AlbumSort, sortDescending: Boolean, captureTimes: Map<String, Long>, loading: Boolean, folderError: String?, selecting: Boolean, selected: List<String>, onBack: () -> Unit, onFolder: (DavItem) -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit,
+    showMediaNames: Boolean, compactMediaNames: Boolean, miniVisible: Boolean, music: WebAlbumMusicPlayback, sortMode: AlbumSort, sortDescending: Boolean, captureTimes: Map<String, Long>, loading: Boolean, folderError: String?, selecting: Boolean, selected: List<String>, onBack: () -> Unit, onFolder: (DavItem) -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit,
     onSelection: (DavItem) -> Unit, onSelectMode: () -> Unit, onSelectAll: () -> Unit, onAction: (Int) -> Unit,
     onColumnsChange: (Int) -> Unit, onSortChange: (AlbumSort) -> Unit, onRangeSelection: (Int, Int, Boolean) -> Unit,
-    onGallery: (List<GalleryMedia>, Int, Map<Int, GalleryOrigin>) -> Unit) {
+    onGallery: (List<GalleryMedia>, Int, Map<Int, GalleryOrigin>) -> Unit,
+    onAudio: (List<MusicTrack>, Int) -> Unit) {
     val direction = if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1 else 1
     val motion = LocalLucentStyle.current.motion
+    val visibleMusicTags by music.discoveredTags.collectAsState()
     AnimatedContent(targetState = folders, transitionSpec = {
         if (!motion) EnterTransition.None togetherWith ExitTransition.None
         else if (targetState.size > initialState.size)
@@ -402,6 +442,12 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
             orderedMedia(list.filter { it.image || it.video }, sortMode, sortDescending, captureTimes)
         }
         val photos = remember(mediaItems, config) { GalleryItems(mediaItems, config) }
+        val audioEntries = remember(list, sortMode, sortDescending) {
+            orderedMedia(list.filter { it.audio }, sortMode, sortDescending)
+        }
+        val audioQueue = remember(audioEntries) {
+            audioEntries.map { MusicTrack(it.url, it.version, it.name) }
+        }
         val sourceMap = remember(photos) { mutableMapOf<Int, GalleryOrigin>() }
         val gridState = rememberLazyGridState()
         val scope = rememberCoroutineScope()
@@ -409,6 +455,7 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
         var columnsOpen by remember { mutableStateOf(false) }
         var sortOpen by remember { mutableStateOf(false) }
         val pressTick = reviewHaptic(ReviewHapticKind.LONG_PRESS)
+        val audioTapTick = reviewHaptic()
         val selectionTick = reviewHaptic(ReviewHapticKind.SELECTION)
         val titleTick = reviewHaptic()
         BackdropHost(overlay = {
@@ -522,7 +569,9 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
                         }
                     }
                 },
-                contentPadding = PaddingValues(start = 13.dp, end = 13.dp, top = 13.dp, bottom = (if (selecting) 96.dp else 21.dp) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())) {
+                contentPadding = PaddingValues(start = 13.dp, end = 13.dp, top = 13.dp,
+                    bottom = (if (selecting) 96.dp else if (miniVisible) 112.dp else 21.dp) +
+                        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())) {
                 items(folderItems, key = { it.url }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(gridUnits / folderColumns) }) { folder ->
                     FolderCard(folder, folderColumns, !loading && path == folders) { onFolder(folder) }
                 }
@@ -577,10 +626,74 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
                         }
                     }
                 }
+                if (audioEntries.isNotEmpty()) {
+                    item(key = "music-heading", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                        Row(Modifier.fillMaxWidth().padding(start = 7.dp, end = 7.dp, top = 14.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.LibraryMusic, null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(10.dp))
+                            Text("音乐 · " + audioEntries.size + " 首",
+                                style = MaterialTheme.typography.titleSmall)
+                        }
+                    }
+                    items(audioEntries.size, key = { "music-" + audioEntries[it].url },
+                        span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { index ->
+                        val item = audioEntries[index]
+                        val musicTrack = audioQueue[index]
+                        val mediaTags = visibleMusicTags[config.videoScope + "|" + musicTrack.scopeId]
+                        LaunchedEffect(config.videoScope, item.url, item.version) {
+                            try {
+                                music.warmTags(musicTrack, config)
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                // The filename and default artwork remain usable offline.
+                            }
+                        }
+                        val track = remember(musicTrack, mediaTags) {
+                            if (mediaTags == null) musicTrack else musicTrack.copy(
+                                title = mediaTags.title.ifBlank { musicTrack.title },
+                                artist = mediaTags.artist.ifBlank { musicTrack.artist },
+                                album = mediaTags.album.ifBlank { musicTrack.album },
+                                artwork = mediaTags.cover,
+                            )
+                        }
+                        LucentCard(Modifier.padding(horizontal = 3.dp, vertical = 3.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (!loading && path == folders) {
+                                                audioTapTick()
+                                                if (selecting) onSelection(item) else onAudio(audioQueue, index)
+                                            }
+                                        },
+                                        onLongClick = { if (!loading) { pressTick(); onSelection(item) } }
+                                    )
+                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                GreenMusicCover(track, Modifier.size(48.dp), 14.dp)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(track.title,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.bodyLarge)
+                                    Text(track.artist.ifBlank { item.name.substringAfterLast('.', "").uppercase() + " · WebDAV" },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Icon(if (selecting) {
+                                    if (item.url in selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked
+                                } else Icons.Outlined.PlayArrow, "播放或选择")
+                            }
+                        }
+                    }
+                }
                 if (!loading && folderError != null && path == folders) item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     LucentCard { Column(Modifier.padding(16.dp)) { Text("无法读取文件夹", style = MaterialTheme.typography.titleMedium); Text(folderError, color = MaterialTheme.colorScheme.error); LucentAction("重试", onClick = onRefresh) } }
                 }
-                if (!loading && folderError == null && list.none { it.directory || it.image || it.video }) item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                if (!loading && folderError == null && list.none { it.directory || it.image || it.video || it.audio }) item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     LucentEmpty("这里还没有媒体", "此目录没有子文件夹或支持的媒体格式。")
                 }
             }

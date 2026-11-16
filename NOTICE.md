@@ -1,6 +1,6 @@
 # Attribution
 
-Selected UI implementations are adapted from Chengeeker's Review (MIT, 2026). Third-party notices are included in `lucent-ui/src/main/assets/licenses/` and `lucent-ui/src/main/assets/glass/LICENSE`; the app also exposes its open-source licenses in About.
+Selected UI implementations are adapted from Chengeeker's Review (MIT, 2026). Music player UI and interaction patterns are adapted from Chengeeker's own GreenMusic (https://github.com/Chengeeker/GreenMusic) for WebDAV playback. Third-party notices are included in `lucent-ui/src/main/assets/licenses/` and `lucent-ui/src/main/assets/glass/LICENSE`; the app also exposes its open-source licenses in About.
 
 The optical shader files retain the copyright and MIT SPDX notices of their respective authors.
 

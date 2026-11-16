@@ -99,6 +99,8 @@ class MainActivity : FragmentActivity() {
 
     override fun onStop() {
         if (::lock.isInitialized && lock.enabled && !isChangingConfigurations) session.locked = true
+        if (!isChangingConfigurations && !AlbumPreferences(this).musicKeepBackground)
+            (application as AlbumApplication).music.pauseForBackground()
         super.onStop()
     }
 

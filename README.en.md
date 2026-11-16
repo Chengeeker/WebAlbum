@@ -1,12 +1,12 @@
 # WebAlbum
 
-**An Android WebDAV photo and video browser/player.** Connect to your own WebDAV server to explore folders, preview photos, play videos, and manage remote media from your phone.
+**An Android WebDAV photo, video, and music browser/player.** Connect to your own WebDAV server to explore folders, preview photos, play videos and music, and manage remote media from your phone.
 
 [简体中文](README.md) · [English](README.en.md) · [Latest release](https://github.com/Chengeeker/WebAlbum/releases/latest) · [LucentUI](https://github.com/Chengeeker/LucentUI)
 
 ## Overview
 
-WebAlbum is a lightweight **WebDAV media browser and player**, not a hosted cloud storage service. You can browse and play supported media stored on your WebDAV server without first syncing the whole library to your phone, and download selected files when needed.
+WebAlbum is a lightweight **WebDAV media browser and player**, not a hosted cloud storage service. You can browse and play photos, video, and music stored on your WebDAV server without syncing the entire library to your phone, and download selected files when needed.
 
 The app uses **Material Design 3** and UI components from my [**LucentUI**](https://github.com/Chengeeker/LucentUI) project. The in-repository `lucent-ui` module contains the UI code used by WebAlbum. Some implementations also draw on [Review](https://github.com/Chengeeker/Review). See [NOTICE.md](NOTICE.md) for attribution and third-party licenses.
 
@@ -21,6 +21,14 @@ The app uses **Material Design 3** and UI components from my [**LucentUI**](http
 - **HDR media:** Detect Ultra HDR images with gain maps on Android 14+, and HLG/PQ video via actual color metadata. HDR badges and a more suitable video output path are used on compatible devices; results depend on the display, platform, and decoder.
 - **Original-resolution viewing:** A centered translucent capsule above the gallery filmstrip can cache or download the full source file with progress. Zooming past roughly 1.6× triggers region-based decoding of visible source pixels instead of stretching a small preview. The capsule follows the existing liquid-glass and haptics settings. Ultra HDR gainmap images conservatively retain the color-correct preview rather than using SDR region tiles.
 - **On-demand image caching:** Load thumbnails and previews without downloading the full remote library.
+
+### Music playback (new in 1.3.2)
+- **WebDAV audio:** Recognizes MP3, FLAC, M4A, AAC, OGG, OPUS, WAV, and other common extensions. Codec support depends on the device and server; folder tracks form a playback queue.
+- **GreenMusic-inspired player:** Mini-player, album cover, lyrics, queue, gradients, and gestures adapted from the author's [GreenMusic](https://github.com/Chengeeker/GreenMusic) project.
+- **Interruptible transitions:** Tap the mini-player while fullscreen is still collapsing to reverse the shared cover/title animation from its current position. Nonessential fullscreen controls fade out rapidly.
+- **Lyrics and tags:** Sidecar LRC files plus some MP3 ID3 USLT/TXXX and FLAC Vorbis Comment lyrics. Untimed lyrics display as text. M4A-specific embedded lyrics are not fully supported. Known embedded artwork and artist names can appear before playback.
+- **Background playback:** Media3 MediaSessionService with system media notifications and controls; Android 13+ requests notification permission. Device restrictions may affect behavior.
+- **Neighbor preloading:** Optionally caches about 768 KiB from the previous and next tracks to reduce WebDAV latency. Includes repeat, shuffle, speed, and lyric preferences.
 
 ### Gallery and file operations
 - **Folders and grid layout:** Browse nested directories and see photos/videos in a unified media grid. Choose 1–5 media columns, with a separate folder-grid preference. Optional filename cards in 1–3 columns can trim common Screenshot, IMG, VID, and WeChat-export prefixes.
@@ -41,11 +49,11 @@ The app uses **Material Design 3** and UI components from my [**LucentUI**](http
 
 Download a signed APK from [GitHub Releases](https://github.com/Chengeeker/WebAlbum/releases).
 
-**[Download WebAlbum v1.2.9 (arm64-v8a)](https://github.com/Chengeeker/WebAlbum/releases/download/v1.2.9/WebAlbum_v1.2.9_arm64-v8a.apk)**
+**[Download WebAlbum v1.3.2 (arm64-v8a)](https://github.com/Chengeeker/WebAlbum/releases/download/v1.3.2/WebAlbum_v1.3.2_arm64-v8a.apk)**
 
 | Item | Requirement |
 | --- | --- |
-| Current version | **1.2.9** (version code 15) |
+| Current version | **1.3.2** (version code 18) |
 | Android | **8.0 / API 26 or later** |
 | CPU architecture | **arm64-v8a** |
 | Application ID | `com.webdav.album` |
@@ -57,7 +65,7 @@ There is no built-in public media library; you must provide a reachable WebDAV e
 
 1. Install the APK and open WebAlbum.
 2. Enter your WebDAV server URL, username, and password.
-3. Browse folders and tap a photo/video to view or play it. Use the top-bar grid control and More menu for layout, sorting, and selection.
+3. Browse folders and tap a photo, video, or audio track to open or play it. Use the top-bar grid control and More menu for layout, sorting, and selection.
 4. Long-press to select multiple files; use the bottom action bar to download, inspect properties, or delete them. Find other preferences under **More → Settings**.
 
 **Warning:** Deleting a file removes it from your WebDAV server and may be irreversible. Back up important media first. Seeking in some videos requires proper HTTP Range support from your server; playback behavior also varies by device codec support.
@@ -87,8 +95,8 @@ README.md             Chinese documentation (default)
 
 ## Current status
 
-Version 1.2.9 passes a signed Release build and 84 host-side unit tests (0 failures). High-resolution region decoding, the liquid-glass capsule, and HDR behavior still need real-device validation on different Android devices. Please share reproducible issues through [GitHub Issues](https://github.com/Chengeeker/WebAlbum/issues).
+Version 1.3.2 passes a signed Release build and 103 host-side unit tests (0 failures). Interruptible music transitions, background notifications, Bluetooth controls, and real WebDAV skip latency still require validation on physical devices. M4A-specific embedded lyrics support remains incomplete. Please share issues through [GitHub Issues](https://github.com/Chengeeker/WebAlbum/issues).
 
 ## License and credits
 
-WebAlbum is released under the [MIT License](LICENSE). UI credits include [LucentUI](https://github.com/Chengeeker/LucentUI) and [Review](https://github.com/Chengeeker/Review). Additional third-party licenses are documented in [NOTICE.md](NOTICE.md) and `lucent-ui/src/main/assets/licenses/`.
+WebAlbum is released under the [MIT License](LICENSE). UI credits include [LucentUI](https://github.com/Chengeeker/LucentUI), [Review](https://github.com/Chengeeker/Review), and the author's [GreenMusic](https://github.com/Chengeeker/GreenMusic). Additional third-party licenses are documented in [NOTICE.md](NOTICE.md) and `lucent-ui/src/main/assets/licenses/`.

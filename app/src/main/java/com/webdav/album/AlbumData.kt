@@ -42,6 +42,7 @@ data class Connection(val url: String, val user: String, val password: String) {
 data class DavItem(val url: String, val name: String, val directory: Boolean, val version: String) {
     val image: Boolean get() = !directory && name.substringAfterLast('.', "").lowercase() in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "avif")
     val video: Boolean get() = !directory && name.substringAfterLast('.', "").lowercase() in setOf("mp4", "m4v", "mov", "3gp", "3gpp", "webm", "mkv", "ts", "m2ts", "avi", "mpg", "mpeg")
+    val audio: Boolean get() = isAudioFile(name, directory)
     fun imageUrl(connection: Connection): String {
         val digest = MessageDigest.getInstance("SHA-256").digest((connection.user + "\u0000" + connection.password + "\u0000" + version).toByteArray())
         val token = Base64.encodeToString(digest, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
@@ -57,6 +58,8 @@ fun validConnection(url: String): HttpUrl? = url.trim().toHttpUrlOrNull()?.takeI
 fun sameOrigin(a: HttpUrl, b: HttpUrl) = a.scheme == b.scheme && a.host == b.host && a.port == b.port
 
 class AlbumApplication : Application(), ImageLoaderFactory {
+    internal val musicStreamCache by lazy { WebAlbumMusicStreamCache(this) }
+    val music by lazy { WebAlbumMusicPlayback(this) }
     private val connectionRevision = java.util.concurrent.atomic.AtomicLong()
     @Volatile var connection: Connection? = null
         set(value) { field = value; connectionRevision.incrementAndGet() }
