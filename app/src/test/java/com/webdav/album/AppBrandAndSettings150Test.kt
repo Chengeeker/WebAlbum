@@ -59,6 +59,6 @@ class AppBrandAndSettings150Test {
             it.isFile && it.readText().contains("applicationId = \"com.webdav.album\"")
         }
         val build = path.readText()
-        assertTrue(build.contains("versionCode = 38; versionName = \"1.5.0\""))
+        assertTrue(build.contains("versionCode = 41; versionName = \"1.5.3\""))
     }
 }

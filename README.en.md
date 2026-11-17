@@ -35,7 +35,7 @@ The app uses **Material Design 3** and UI components from my [**LucentUI**](http
 - **Quick navigation:** Pull to refresh and double-tap the top-bar title to scroll to the top.
 - **Sorting:** Sort by capture time, modified time, or filename, in ascending or descending order. Most recently modified files appear first by default.
 - **Range selection:** Long-press and drag to select multiple items; drag back toward the start to shrink the selection. Download, inspect properties, or delete selected files.
-- **Local downloads:** Choose a save destination through the Android system file picker or configure a folder for batch downloads.
+- **Local downloads:** Choose a destination through the Android system file picker or configure separate batch download folders for images, videos, and music.
 
 > **About capture-time sorting:** WebDAV may not expose capture timestamps. WebAlbum currently prefers EXIF metadata available from cached images, falling back to the remote modified time when no capture timestamp is available (including for many videos). It does not guarantee a true chronological capture order for every file.
 
@@ -44,6 +44,21 @@ The app uses **Material Design 3** and UI components from my [**LucentUI**](http
 - **Interaction feedback:** Page transition effects, touch and range-selection haptics, with settings to disable animations or haptic feedback.
 - **App protection:** Optional PIN/biometric locking and screenshot protection.
 - **Settings backup:** Export/restore non-sensitive preferences. WebDAV credentials are not included in the settings export.
+
+## What's new in 1.5.3 (since v1.5.0)
+
+### Added
+- **Separate image, video, and music download folders.** Select or clear each destination in Settings → Storage; batch downloads automatically use the matching media category.
+- **Compatible migration of existing settings.** The previous shared image/video folder is retained for those categories, while music has its own destination. Access permissions remain valid when other categories still reference the same folder.
+
+### Fixed
+- **Off-center lyrics.** The active line is positioned using the actual line heights, bilingual text, and viewport size instead of a fixed offset that pushed it toward the bottom.
+- **Abrupt lyric switching.** Line-size updates no longer cancel the in-progress scroll animation; neighboring lines scroll smoothly even with the optional stagger effect disabled.
+- **Lag on first full-player expansion.** Reduces first-open initialization and repeated GPU effects during the capsule transition, while retaining its shared artwork/title animation.
+
+### Improved
+- **Lyric following.** Normal adjacent lines animate smoothly; large seeks jump directly to the destination. Global reduced-motion preferences are respected.
+- **Storage Access Framework permissions.** Replacing one media folder does not revoke an authorization that other categories still need.
 
 ## What's new in 1.5.0
 
@@ -57,11 +72,11 @@ The app uses **Material Design 3** and UI components from my [**LucentUI**](http
 
 Download a signed APK from [GitHub Releases](https://github.com/Chengeeker/WebAlbum/releases).
 
-**[Download WebAlbum v1.5.0 (arm64-v8a)](https://github.com/Chengeeker/WebAlbum/releases/download/v1.5.0/WebAlbum_v1.5.0_arm64-v8a.apk)**
+**[Download WebAlbum v1.5.3 (arm64-v8a)](https://github.com/Chengeeker/WebAlbum/releases/download/v1.5.3/WebAlbum_v1.5.3_arm64-v8a.apk)**
 
 | Item | Requirement |
 | --- | --- |
-| Current version | **1.5.0** (version code 38) |
+| Current version | **1.5.3** (version code 41) |
 | Android | **8.0 / API 26 or later** |
 | CPU architecture | **arm64-v8a** |
 | Application ID | `com.webdav.album` |
@@ -103,7 +118,7 @@ README.md             Chinese documentation (default)
 
 ## Current status
 
-Version 1.3.2 passes a signed Release build and 180 host-side unit tests (0 failures). Interruptible music transitions, background notifications, Bluetooth controls, and real WebDAV skip latency still require validation on physical devices. M4A-specific embedded lyrics support remains incomplete. Please share issues through [GitHub Issues](https://github.com/Chengeeker/WebAlbum/issues).
+Version 1.5.3 passes a signed Release build and 188 host-side unit tests (0 failures). Interruptible music transitions, background notifications, Bluetooth controls, and real WebDAV skip latency still require validation on physical devices. M4A-specific embedded lyrics support remains incomplete. Please share issues through [GitHub Issues](https://github.com/Chengeeker/WebAlbum/issues).
 
 ## License and credits
 

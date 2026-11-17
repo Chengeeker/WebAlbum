@@ -55,3 +55,44 @@ internal fun greenMusicArtworkScheme(seed: Int, dark: Boolean): ColorScheme {
         scrim = Color(s.scrim)
     )
 }
+
+/**
+ * Small thread-safe playlist artwork scheme cache. The mini player prepares
+ * both tonal palettes OFF the UI thread before the first fullscreen open.
+ * No decode/quantization/ColorScheme construction is needed in the first
+ * animation frame if the artwork has already arrived.
+ */
+internal object MusicArtworkPaletteCache {
+    private data class Entry(
+        val bytes: ByteArray,
+        val light: ColorScheme,
+        val dark: ColorScheme,
+    )
+    private val palettes = object : LinkedHashMap<String, Entry>(8, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Entry>?): Boolean =
+            size > 6
+    }
+
+    @Synchronized
+    fun cached(id: String, bytes: ByteArray, dark: Boolean): ColorScheme? {
+        val entry = palettes[id] ?: return null
+        if (entry.bytes !== bytes && !entry.bytes.contentEquals(bytes)) return null
+        return if (dark) entry.dark else entry.light
+    }
+
+    suspend fun getOrPrepare(id: String, bytes: ByteArray, dark: Boolean): ColorScheme? {
+        cached(id, bytes, dark)?.let { return it }
+        val seed = greenMusicArtworkSeed(bytes) ?: return null
+        val prepared = withContext(Dispatchers.Default) {
+            val lightScheme = greenMusicArtworkScheme(seed, false)
+            val darkScheme = greenMusicArtworkScheme(seed, true)
+            lightScheme to darkScheme
+        }
+        synchronized(this) {
+            // Do not overwrite an unrelated more recent track with stale
+            // work when an old request finishes out of order.
+            palettes[id] = Entry(bytes, prepared.first, prepared.second)
+        }
+        return if (dark) prepared.second else prepared.first
+    }
+}

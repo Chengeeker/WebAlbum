@@ -177,14 +177,25 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
     }
     fun download(items: List<DavItem>) {
         if (saving || items.isEmpty()) return
-        val tree = prefs.downloadTree
-        if (tree.isBlank()) { message = "请先在设置 → 存储设置中选择保存目录。"; return }
+        val kindsMissing = items.mapNotNull { item ->
+            mediaSaveKind(item)?.takeIf { prefs.treeFor(it).isBlank() }
+        }.distinct()
+        if (kindsMissing.isNotEmpty()) {
+            message = "请先在设置 → 存储设置中选择" +
+                kindsMissing.joinToString("、") { it.label } + "保存目录。"
+            return
+        }
         saving = true
         scope.launch {
             var completed = 0
             val failures = mutableListOf<String>()
             items.forEach { item ->
-                try { withContext(Dispatchers.IO) { saveToTree(context, app.client, tree, item) }; completed++ }
+                try {
+                    val targetTree = prefs.treeFor(item)
+                    require(targetTree.isNotBlank()) { "未设置对应媒体目录" }
+                    withContext(Dispatchers.IO) { saveToTree(context, app.client, targetTree, item) }
+                    completed++
+                }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { failures += item.name }
             }
@@ -447,7 +458,7 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                     prepareReturn = { page -> galleryPrepareReturn?.invoke(page) },
                     onSave = { item ->
                     val entry = entries.firstOrNull { it.url == (item.video.ifBlank { item.url }).substringBefore('#') }
-                    if (entry != null && prefs.downloadTree.isNotBlank()) download(listOf(entry))
+                    if (entry != null && prefs.treeFor(entry).isNotBlank()) download(listOf(entry))
                     else { pending = item; save.launch(item.description.ifBlank { "image.jpg" }) }
                 })
             }

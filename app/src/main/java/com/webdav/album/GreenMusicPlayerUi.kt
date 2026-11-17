@@ -19,6 +19,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -37,6 +40,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
@@ -463,6 +467,77 @@ private fun KaraokeMusicLine(
     }
 }
 
+/**
+ * The target is an ABSOLUTE scroll distance measured from the start of the
+ * lyric list. Positive scroll means the list moves UP. The previous
+ * scrollToItem(current, -centerPx) did the opposite, placing the active
+ * lyric at the bottom.
+ *
+ * Layout model: measured row heights + the real 14dp inter-row gap. Both
+ * content paddings are explicitly included. This is an independent
+ * implementation of cumulative lyric centering, not copied source code.
+ */
+internal data class LyricScrollGeometry(
+    val targetPx: Float,
+    val topPaddingPx: Float,
+    val bottomPaddingPx: Float,
+    val startsPx: List<Float>,
+)
+
+internal fun lyricScrollGeometry(
+    viewportPx: Int,
+    rowHeightsPx: List<Int>,
+    rowGapPx: Int,
+    current: Int,
+): LyricScrollGeometry {
+    if (rowHeightsPx.isEmpty()) return LyricScrollGeometry(0f, 0f, 0f, emptyList())
+    val h = viewportPx.coerceAtLeast(1).toFloat()
+    val heights = rowHeightsPx.map { it.coerceAtLeast(1).toFloat() }
+    val center = h / 2f
+    val before = (center - heights.first() / 2f).coerceAtLeast(0f)
+    val after = (center - heights.last() / 2f).coerceAtLeast(0f)
+    val gap = rowGapPx.coerceAtLeast(0).toFloat()
+    var cumulative = 0f
+    val starts = heights.mapIndexed { index, height ->
+        val start = cumulative
+        cumulative += height + if (index < heights.lastIndex) gap else 0f
+        start
+    }
+    val i = current.coerceIn(0, heights.lastIndex)
+    val desired = before + starts[i] + heights[i] / 2f - center
+    val maxScroll = (before + cumulative + after - h).coerceAtLeast(0f)
+    return LyricScrollGeometry(
+        targetPx = desired.coerceIn(0f, maxScroll),
+        topPaddingPx = before,
+        bottomPaddingPx = after,
+        startsPx = starts,
+    )
+}
+
+/**
+ * Stable follow behavior: adjacent and short sequential transitions animate
+ * even when the optional per-line stagger effect is disabled. Large seeking
+ * jumps snap so the UI never scrolls through an entire song.
+ */
+internal fun lyricAutoScrollDurationMs(
+    previous: Int,
+    current: Int,
+    motionEnabled: Boolean,
+    staggerEnabled: Boolean,
+): Int {
+    val moved = kotlin.math.abs(current - previous)
+    if (!motionEnabled || moved == 0 || moved > 4) return 0
+    return if (staggerEnabled) 300 else 260
+}
+
+/** Get the absolute current scroll in the same units as LyricScrollGeometry. */
+internal fun lyricCurrentScrollPx(
+    geometry: LyricScrollGeometry,
+    index: Int,
+    firstVisibleItemScrollOffset: Int,
+): Float = (geometry.startsPx.getOrNull(index) ?: 0f) +
+    firstVisibleItemScrollOffset.coerceAtLeast(0)
+
 @Composable
 private fun GreenMusicLyricPanel(
     lyric: MusicLyrics, position: Long, duration: Long,
@@ -484,81 +559,182 @@ private fun GreenMusicLyricPanel(
     val current = remember(lyric.lines, position) {
         lyric.lines.indexOfLast { it.timeMs <= position }.coerceAtLeast(0)
     }
-    val state = rememberLazyListState()
     val karaokeTime by animateFloatAsState(
         targetValue = position.toFloat(),
         animationSpec = if (prefs.style.motion) tween(220, easing = androidx.compose.animation.core.LinearEasing)
             else snap(),
         label = "karaoke-playback-time",
     )
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
     BoxWithConstraints(modifier.clipToBounds()) {
-        // Scroll the active BILINGUAL row into the body of the viewport,
-        // not flush to its top edge where the Chinese row was cut off.
-        // Derive the anchor from available space (including smaller phones).
-        val anchor = 112.dp
-        val trailing = 196.dp
-        val anchorPx = with(androidx.compose.ui.platform.LocalDensity.current) { anchor.roundToPx() }
-        LaunchedEffect(lyric.lines, current, anchorPx, prefs.musicLyricsStagger, prefs.style.motion) {
-            if (!state.isScrollInProgress) {
-                if (prefs.musicLyricsStagger && prefs.style.motion)
-                    state.animateScrollToItem(current, scrollOffset = -anchorPx)
-                else state.scrollToItem(current, scrollOffset = -anchorPx)
+        val viewportPx = constraints.maxHeight.coerceAtLeast(1)
+        val widthPx = with(density) { (maxWidth - 24.dp).roundToPx().coerceAtLeast(1) }
+        val gapPx = with(density) { 14.dp.roundToPx() }
+        val rowPadPx = with(density) { 8.dp.roundToPx() }
+        val translationGapPx = with(density) { 5.dp.roundToPx() }
+        val mainStyle = androidx.compose.ui.text.TextStyle(
+            fontSize = prefs.musicLyricsFontSize.sp,
+            lineHeight = (prefs.musicLyricsFontSize * 1.3f).sp,
+            fontWeight = FontWeight(prefs.musicLyricsWeight),
+            textAlign = if (prefs.musicLyricsCenter) TextAlign.Center else TextAlign.Start,
+        )
+        val translationStyle = androidx.compose.ui.text.TextStyle(
+            fontSize = (prefs.musicLyricsFontSize * .68f).sp,
+            lineHeight = (prefs.musicLyricsFontSize * .95f).sp,
+            textAlign = if (prefs.musicLyricsCenter) TextAlign.Center else TextAlign.Start,
+        )
+        val rowEstimates = remember(lyric.lines, widthPx, mainStyle, translationStyle, density) {
+            lyric.lines.map { line ->
+                val width = androidx.compose.ui.unit.Constraints(maxWidth = widthPx)
+                val mainHeight = measurer.measure(
+                    androidx.compose.ui.text.AnnotatedString(line.text.ifBlank { " " }),
+                    style = mainStyle, constraints = width,
+                ).size.height
+                val translated = line.translation.takeIf { it.isNotBlank() }
+                    ?.let {
+                        measurer.measure(
+                            androidx.compose.ui.text.AnnotatedString(it),
+                            style = translationStyle, constraints = width,
+                            maxLines = 3,
+                        ).size.height + translationGapPx
+                    } ?: 0
+                (mainHeight + translated + rowPadPx).coerceAtLeast(1)
+            }
+        }
+        val observedRowHeights = remember(lyric.lines, widthPx) {
+            mutableStateMapOf<Int, Int>()
+        }
+        // Rows are independently measured when materialized. The current
+        // line's real height wins over estimates, including bilingual lines.
+        val rowHeights = remember(rowEstimates, observedRowHeights.toMap()) {
+            rowEstimates.mapIndexed { i, predicted ->
+                observedRowHeights[i] ?: predicted
+            }
+        }
+        val geometry = remember(rowHeights, viewportPx, gapPx, current) {
+            lyricScrollGeometry(viewportPx, rowHeights, gapPx, current)
+        }
+        val scrollState = remember(lyric.lines, widthPx, viewportPx) {
+            val i = geometry.startsPx.indexOfLast { it <= geometry.targetPx }
+                .coerceIn(0, lyric.lines.lastIndex)
+            val offset = (geometry.targetPx - geometry.startsPx[i]).toInt()
+                .coerceAtLeast(0)
+            androidx.compose.foundation.lazy.LazyListState(i, offset)
+        }
+        val dragged by scrollState.interactionSource.collectIsDraggedAsState()
+        // Row measurements can change as the active lyric gains weight or
+        // translations become visible. Do NOT key the animation to rowHeights:
+        // that canceled an in-flight scroll, then the restart snapped the row
+        // to its destination with no visible scrolling.
+        val latestGeometry by rememberUpdatedState(geometry)
+        val lastAutoIndex = remember(lyric.lines) { mutableIntStateOf(current) }
+        LaunchedEffect(lyric.lines, current, viewportPx, prefs.style.motion) {
+            val previous = lastAutoIndex.intValue
+            lastAutoIndex.intValue = current
+            if (dragged) return@LaunchedEffect
+            val durationMs = lyricAutoScrollDurationMs(
+                previous, current, prefs.style.motion, prefs.musicLyricsStagger,
+            )
+            // Allow the selected row's size to settle for one rendering frame
+            // without making its measurements a cancellation key.
+            androidx.compose.runtime.withFrameNanos { }
+            val layout = latestGeometry
+            val actual = lyricCurrentScrollPx(
+                layout, scrollState.firstVisibleItemIndex,
+                scrollState.firstVisibleItemScrollOffset,
+            )
+            val delta = layout.targetPx - actual
+            if (kotlin.math.abs(delta) > 1.5f) {
+                if (durationMs > 0) {
+                    scrollState.animateScrollBy(
+                        delta, animationSpec = tween(
+                            durationMillis = durationMs,
+                            easing = CubicBezierEasing(.215f, .61f, .355f, 1f),
+                        ),
+                    )
+                } else scrollState.scrollBy(delta)
+            }
+            // If bilingual lines remeasured during the animation, make only
+            // a short final correction; never interrupt the main flight.
+            val settled = latestGeometry
+            val residual = settled.targetPx - lyricCurrentScrollPx(
+                settled, scrollState.firstVisibleItemIndex,
+                scrollState.firstVisibleItemScrollOffset,
+            )
+            if (kotlin.math.abs(residual) > 2f && !dragged) {
+                if (durationMs > 0 && kotlin.math.abs(residual) < 90f) {
+                    scrollState.animateScrollBy(
+                        residual, animationSpec = tween(
+                            durationMillis = 90,
+                            easing = CubicBezierEasing(.215f, .61f, .355f, 1f),
+                        ),
+                    )
+                } else scrollState.scrollBy(residual)
             }
         }
         LazyColumn(
-            modifier = Modifier.fillMaxSize(), state = state,
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp,
-                top = anchor, bottom = trailing),
+            modifier = Modifier.fillMaxSize(),
+            state = scrollState,
+            contentPadding = PaddingValues(
+                start = 12.dp, end = 12.dp,
+                top = with(density) { geometry.topPaddingPx.toDp() },
+                bottom = with(density) { geometry.bottomPaddingPx.toDp() },
+            ),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-        itemsIndexed(lyric.lines) { i, line ->
-            val selected = i == current
-            val alpha by animateFloatAsState(
-                if (selected) 1f else if (prefs.musicLyricsBlur) .48f else .65f,
-                animationSpec = tween(280, easing = CubicBezierEasing(.645f,.045f,.355f,1f)),
-                label = "GreenMusic lyric fade",
-            )
-            val scale by animateFloatAsState(
-                if (selected) 1f else .94f, animationSpec = tween(280),
-                label = "GreenMusic lyric scale",
-            )
-            val words = remember(lyric.lines, i, selected, duration,
-                prefs.musicLyricKaraoke, prefs.style.motion) {
-                if (selected && prefs.style.motion)
-                    musicKaraokeWords(lyric.lines, i, duration, prefs.musicLyricKaraoke)
-                else emptyList()
-            }
-            Column(
-                Modifier.fillMaxWidth()
-                    .graphicsLayer { this.alpha = alpha; scaleX = scale; scaleY = scale }
-                    .clickable(onClick = hapticClick { onSeek(line.timeMs) })
-                    .padding(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                KaraokeMusicLine(
-                    text = line.text, words = words, positionMs = karaokeTime,
-                    fontSize = prefs.musicLyricsFontSize,
-                    weight = if (selected) prefs.musicLyricsWeight
-                        else (prefs.musicLyricsWeight - 100).coerceAtLeast(100),
-                    center = prefs.musicLyricsCenter,
-                    base = MaterialTheme.colorScheme.onSurface,
-                    accent = MaterialTheme.colorScheme.primary,
+            itemsIndexed(lyric.lines) { i, line ->
+                val selected = i == current
+                val alpha by animateFloatAsState(
+                    if (selected) 1f else if (prefs.musicLyricsBlur) .48f else .65f,
+                    animationSpec = tween(280, easing = CubicBezierEasing(.645f,.045f,.355f,1f)),
+                    label = "GreenMusic lyric fade",
                 )
-                if (line.translation.isNotBlank()) {
-                    Text(
-                        line.translation,
-                        Modifier.fillMaxWidth(),
-                        textAlign = if (prefs.musicLyricsCenter) TextAlign.Center else TextAlign.Start,
-                        fontSize = (prefs.musicLyricsFontSize * .68f).sp,
-                        lineHeight = (prefs.musicLyricsFontSize * .95f).sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
+                val scale by animateFloatAsState(
+                    if (selected) 1f else .94f,
+                    animationSpec = tween(280),
+                    label = "GreenMusic lyric scale",
+                )
+                val words = remember(lyric.lines, i, selected, duration,
+                    prefs.musicLyricKaraoke, prefs.style.motion) {
+                    if (selected && prefs.style.motion)
+                        musicKaraokeWords(lyric.lines, i, duration, prefs.musicLyricKaraoke)
+                    else emptyList()
+                }
+                Column(
+                    Modifier.fillMaxWidth()
+                        .onSizeChanged { size ->
+                            if (size.height > 0 && observedRowHeights[i] != size.height)
+                                observedRowHeights[i] = size.height
+                        }
+                        .graphicsLayer { this.alpha = alpha; scaleX = scale; scaleY = scale }
+                        .clickable(onClick = hapticClick { onSeek(line.timeMs) })
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    KaraokeMusicLine(
+                        text = line.text, words = words, positionMs = karaokeTime,
+                        fontSize = prefs.musicLyricsFontSize,
+                        weight = if (selected) prefs.musicLyricsWeight
+                            else (prefs.musicLyricsWeight - 100).coerceAtLeast(100),
+                        center = prefs.musicLyricsCenter,
+                        base = MaterialTheme.colorScheme.onSurface,
+                        accent = MaterialTheme.colorScheme.primary,
                     )
+                    if (line.translation.isNotBlank()) {
+                        Text(
+                            line.translation, Modifier.fillMaxWidth(),
+                            textAlign = if (prefs.musicLyricsCenter) TextAlign.Center else TextAlign.Start,
+                            fontSize = (prefs.musicLyricsFontSize * .68f).sp,
+                            lineHeight = (prefs.musicLyricsFontSize * .95f).sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
-    }
     }
 }
 
@@ -635,12 +811,20 @@ internal fun GreenMusicPlayerScreen(music: WebAlbumMusicPlayback, prefs: AlbumPr
     BackHandler(enabled = expanded, onBack = if (showLyrics) {{ showLyrics = false }} else onBack)
     val base = MaterialTheme.colorScheme
     val dark = base.background.luminance() < .5f
-    val seed by produceState<Int?>(initialValue = null, key1 = track?.scopeId, key2 = track?.artwork) {
-        value = track?.artwork?.let { runCatching { greenMusicArtworkSeed(it) }.getOrNull() }
+    val prewarmed = remember(track?.scopeId, track?.artwork, dark) {
+        track?.artwork?.let { artwork ->
+            MusicArtworkPaletteCache.cached(track.scopeId, artwork, dark)
+        }
     }
-    val artworkScheme = remember(seed, dark, base) {
-        seed?.let { greenMusicArtworkScheme(it, dark) } ?: base
+    val artworkSchemeByTrack by produceState<ColorScheme?>(
+        initialValue = prewarmed,
+        key1 = track?.scopeId, key2 = track?.artwork, key3 = dark,
+    ) {
+        value = track?.artwork?.let { artwork ->
+            MusicArtworkPaletteCache.getOrPrepare(track.scopeId, artwork, dark)
+        }
     }
+    val artworkScheme = artworkSchemeByTrack ?: base
     MaterialTheme(colorScheme = artworkScheme) {
     val gradient = Brush.verticalGradient(listOf(
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = .46f)

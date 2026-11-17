@@ -75,26 +75,48 @@ fun SettingsHome(prefs: AlbumPreferences, connection: Connection?, lock: AppLock
 @Composable
 fun StorageSettingsPage(prefs: AlbumPreferences, onBack: () -> Unit, report: (String) -> Unit) {
     val context = LocalContext.current
+    var choosing by remember { mutableStateOf<MediaSaveKind?>(null) }
+    val resolver = context.contentResolver
+    val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
     val choose = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) runCatching {
-            val previous = prefs.downloadTree
-            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            prefs.updateDownloadTree(uri.toString())
-            if (previous.isNotBlank() && previous != uri.toString()) runCatching {
-                context.contentResolver.releasePersistableUriPermission(Uri.parse(previous), Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        val kind = choosing
+        choosing = null
+        if (uri != null && kind != null) runCatching {
+            resolver.takePersistableUriPermission(uri, flags)
+            val before = prefs.treeFor(kind)
+            prefs.updateMediaDownloadTree(kind, uri.toString())
+            // One SAF grant may be shared by several categories. Do not
+            // revoke it until *none* of them still reference that URI.
+            if (before.isNotBlank() && before != uri.toString() &&
+                !prefs.isTreeStillUsed(before)) {
+                runCatching { resolver.releasePersistableUriPermission(Uri.parse(before), flags) }
             }
-        }.onFailure { report("未获得目录写入权限，请重新选择。") }
+        }.onFailure { report("未获得" + kind.label + "目录的写入权限，请重新选择。") }
     }
     SettingsScaffold("存储设置", onBack) {
-        LucentSection("存储位置") {
-            LucentRow("图片与视频目录", if (prefs.downloadTree.isBlank()) "每次保存时选择位置" else Uri.parse(prefs.downloadTree).lastPathSegment ?: "已选择系统授权目录", Icons.Outlined.FolderOpen, onClick = { choose.launch(null) })
-            if (prefs.downloadTree.isNotBlank()) LucentRow("恢复默认", "保存单个文件时重新选择位置", onClick = {
-                val previous = prefs.downloadTree
-                prefs.updateDownloadTree("")
-                runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(previous), Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
-            })
+        LucentSection("保存位置") {
+            MediaSaveKind.entries.forEach { kind ->
+                val saved = prefs.treeFor(kind)
+                LucentRow(
+                    kind.label + "保存目录",
+                    if (saved.isBlank()) "未选择，单个文件保存时可以手动选择"
+                    else Uri.parse(saved).lastPathSegment ?: "已选择系统授权目录",
+                    Icons.Outlined.FolderOpen,
+                    onClick = { choosing = kind; choose.launch(null) },
+                )
+                if (saved.isNotBlank()) {
+                    LucentRow("清除" + kind.label + "目录", icon = Icons.Outlined.Close,
+                        onClick = {
+                            prefs.updateMediaDownloadTree(kind, "")
+                            if (!prefs.isTreeStillUsed(saved)) {
+                                runCatching { resolver.releasePersistableUriPermission(Uri.parse(saved), flags) }
+                            }
+                        })
+                }
+            }
         }
-        Text("批量下载需要先选择保存目录。目录授权不可随设置备份迁移。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("批量保存需为相应媒体类型设置目录；图片、视频和音乐分别保存。目录授权不会随设置备份迁移。",
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

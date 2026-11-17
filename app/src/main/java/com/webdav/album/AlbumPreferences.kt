@@ -13,6 +13,20 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONObject
 
+/** Persisted Storage Access Framework folders per media category. */
+enum class MediaSaveKind(val label: String) {
+    IMAGE("图片"), VIDEO("视频"), MUSIC("音乐"),
+}
+
+/** Do not treat an audio file as an image/video just because it is browsed together. */
+internal fun mediaSaveKind(item: DavItem): MediaSaveKind? = when {
+    item.directory -> null
+    item.audio -> MediaSaveKind.MUSIC
+    item.video -> MediaSaveKind.VIDEO
+    item.image -> MediaSaveKind.IMAGE
+    else -> null
+}
+
 data class NetworkSettings(val timeout: Int = 30, val mode: String = "system", val host: String = "127.0.0.1", val port: Int = 8080)
 fun validNetwork(value: NetworkSettings) = value.timeout in setOf(15, 30, 60) && value.mode in setOf("system", "direct", "http") &&
     value.port in 1..65535 && value.host.length in 1..253 && value.host.none { it.isWhitespace() || it in "/@\\?#" }
@@ -64,7 +78,14 @@ class AlbumPreferences(context: Context) {
         private set
     var sortDescending by mutableStateOf(prefs.getBoolean("sortDescending", true))
         private set
+    // Legacy v1.5.0 shared image/video folder. Never silently reuse it for music.
     var downloadTree by mutableStateOf(prefs.getString("downloadTree", "").orEmpty())
+        private set
+    var imageDownloadTree by mutableStateOf(prefs.getString("imageDownloadTree", downloadTree).orEmpty())
+        private set
+    var videoDownloadTree by mutableStateOf(prefs.getString("videoDownloadTree", downloadTree).orEmpty())
+        private set
+    var musicDownloadTree by mutableStateOf(prefs.getString("musicDownloadTree", "").orEmpty())
         private set
     var predictive by mutableStateOf(prefs.getBoolean("predictive", false))
         private set
@@ -113,7 +134,36 @@ class AlbumPreferences(context: Context) {
         check(prefs.edit().putString("sortMode", mode.key).putBoolean("sortDescending", reverse).commit())
         sortMode = mode; sortDescending = reverse
     }
-    fun updateDownloadTree(value: String) { check(prefs.edit().putString("downloadTree", value).commit()); downloadTree = value }
+    /** Backward-compatible old shared setting: applies only to pictures and videos. */
+    fun updateDownloadTree(value: String) {
+        check(prefs.edit().putString("downloadTree", value)
+            .remove("imageDownloadTree").remove("videoDownloadTree").commit())
+        downloadTree = value
+        imageDownloadTree = value
+        videoDownloadTree = value
+    }
+    fun treeFor(kind: MediaSaveKind): String = when (kind) {
+        MediaSaveKind.IMAGE -> imageDownloadTree
+        MediaSaveKind.VIDEO -> videoDownloadTree
+        MediaSaveKind.MUSIC -> musicDownloadTree
+    }
+    fun treeFor(item: DavItem): String = mediaSaveKind(item)?.let(::treeFor).orEmpty()
+    fun isTreeStillUsed(uri: String): Boolean = uri.isNotBlank() &&
+        MediaSaveKind.entries.any { treeFor(it) == uri }
+    /** A cleared individual folder overrides an old shared folder, it must not fall back. */
+    fun updateMediaDownloadTree(kind: MediaSaveKind, value: String) {
+        val key = when (kind) {
+            MediaSaveKind.IMAGE -> "imageDownloadTree"
+            MediaSaveKind.VIDEO -> "videoDownloadTree"
+            MediaSaveKind.MUSIC -> "musicDownloadTree"
+        }
+        check(prefs.edit().putString(key, value).commit())
+        when (kind) {
+            MediaSaveKind.IMAGE -> imageDownloadTree = value
+            MediaSaveKind.VIDEO -> videoDownloadTree = value
+            MediaSaveKind.MUSIC -> musicDownloadTree = value
+        }
+    }
     fun updatePredictive(value: Boolean) { check(prefs.edit().putBoolean("predictive", value).commit()); predictive = value }
     fun updatePrivacy(value: Boolean) { check(prefs.edit().putBoolean("privacy", value).commit()); privacy = value }
     fun updateRefresh(value: Int) { check(prefs.edit().putInt("refresh", value).commit()); refresh = value }

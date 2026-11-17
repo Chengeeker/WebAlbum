@@ -134,6 +134,59 @@ class PreferencesAndLockTest {
         assertEquals(MusicKaraokeMode.ALL, reloaded.musicLyricKaraoke)
     }
 
+    @Test fun mediaSaveDirectoriesAreIndependentAndLegacyFoldersMigrateSafely() {
+        val old = AlbumPreferences(app)
+        old.updateDownloadTree("content://test/tree/legacy")
+        val migrated = AlbumPreferences(app)
+        assertEquals("content://test/tree/legacy", migrated.imageDownloadTree)
+        assertEquals("content://test/tree/legacy", migrated.videoDownloadTree)
+        assertEquals("", migrated.musicDownloadTree)
+
+        migrated.updateMediaDownloadTree(MediaSaveKind.IMAGE, "content://test/tree/photos")
+        migrated.updateMediaDownloadTree(MediaSaveKind.VIDEO, "content://test/tree/videos")
+        migrated.updateMediaDownloadTree(MediaSaveKind.MUSIC, "content://test/tree/music")
+        val reloaded = AlbumPreferences(app)
+        assertEquals("content://test/tree/photos", reloaded.treeFor(MediaSaveKind.IMAGE))
+        assertEquals("content://test/tree/videos", reloaded.treeFor(MediaSaveKind.VIDEO))
+        assertEquals("content://test/tree/music", reloaded.treeFor(MediaSaveKind.MUSIC))
+        assertEquals("content://test/tree/photos",
+            reloaded.treeFor(DavItem("https://host.test/a.jpg", "a.jpg", false, "")))
+        assertEquals("content://test/tree/videos",
+            reloaded.treeFor(DavItem("https://host.test/a.mp4", "a.mp4", false, "")))
+        assertEquals("content://test/tree/music",
+            reloaded.treeFor(DavItem("https://host.test/a.flac", "a.flac", false, "")))
+        assertNull(mediaSaveKind(DavItem("https://host.test/dir/", "dir", true, "")))
+        assertEquals("", reloaded.treeFor(DavItem("https://host.test/no.txt", "no.txt", false, "")))
+
+        // Explicitly clearing a per-category directory may NOT resurrect the
+        // old common directory from SharedPreferences.
+        reloaded.updateMediaDownloadTree(MediaSaveKind.IMAGE, "")
+        assertEquals("", AlbumPreferences(app).treeFor(MediaSaveKind.IMAGE))
+        assertEquals("content://test/tree/videos",
+            AlbumPreferences(app).treeFor(MediaSaveKind.VIDEO))
+        assertEquals("content://test/tree/music",
+            AlbumPreferences(app).treeFor(MediaSaveKind.MUSIC))
+
+        // Settings export excludes SAF URIs; import must preserve local grants.
+        val backup = reloaded.exportSettings()
+        assertFalse(backup.contains("content://test/tree"))
+        reloaded.importSettings(backup)
+        assertEquals("content://test/tree/videos", reloaded.videoDownloadTree)
+        assertEquals("content://test/tree/music", reloaded.musicDownloadTree)
+    }
+
+    @Test fun sharedMediaFolderPermissionIsNotRevokedUntilItsLastUserChanges() {
+        val p = AlbumPreferences(app)
+        val shared = "content://test/tree/shared"
+        p.updateMediaDownloadTree(MediaSaveKind.IMAGE, shared)
+        p.updateMediaDownloadTree(MediaSaveKind.MUSIC, shared)
+        assertTrue(p.isTreeStillUsed(shared))
+        p.updateMediaDownloadTree(MediaSaveKind.IMAGE, "")
+        assertTrue(p.isTreeStillUsed(shared))
+        p.updateMediaDownloadTree(MediaSaveKind.MUSIC, "")
+        assertFalse(p.isTreeStillUsed(shared))
+    }
+
     @Test fun sortingPersistsAndOlderBackupsUseNewestModifiedFirst() {
         val prefs = AlbumPreferences(app)
         assertEquals(AlbumSort.MODIFIED, prefs.sortMode)

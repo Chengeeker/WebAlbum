@@ -103,7 +103,12 @@ internal fun GreenMusicAlbumLyricsSwitcher(
             )
         }) {
             Box(Modifier.fillMaxSize().graphicsLayer { translationX = positions.album }) { album() }
-            Box(Modifier.fillMaxSize().graphicsLayer { translationX = positions.lyrics }) { lyrics() }
+            // The off-screen bilingual LazyColumn used to be composed on the
+            // same first frame as opening fullscreen. Mount it on demand;
+            // it is not drawn until the user reveals the lyric page.
+            if (lyricsVisible || dragging || x < -1f) {
+                Box(Modifier.fillMaxSize().graphicsLayer { translationX = positions.lyrics }) { lyrics() }
+            }
         }
     }
 }

@@ -93,6 +93,109 @@ class BilingualKaraokeAndMiniGlassTest {
         assertEquals(0f, karaokeGlyphFill(1f, Float.NaN), 0f)
     }
 
+    @Test fun cumulativeLyricScrollCentersCurrentLineOnBothSides() {
+        // This regression MUST measure the current lyric's actual viewport
+        // coordinates, not merely assert that a formula is symmetric.
+        val height = 350
+        val rowHeights = listOf(68, 84, 102, 56, 110, 74, 61)
+        for (index in rowHeights.indices) {
+            val layout = lyricScrollGeometry(height, rowHeights, 14, index)
+            val activeTop = layout.topPaddingPx + layout.startsPx[index] -
+                layout.targetPx
+            val physicalCenter = activeTop + rowHeights[index] / 2f
+            assertEquals(
+                "Lyric $index must be visibly centered, not at the bottom",
+                height / 2f, physicalCenter, 1f,
+            )
+            assertTrue("Scroll targets must never be negative", layout.targetPx >= 0f)
+        }
+        assertEquals(0f, lyricScrollGeometry(350, rowHeights, 14, 0).targetPx, .01f)
+        val last = lyricScrollGeometry(350, rowHeights, 14, rowHeights.lastIndex)
+        assertTrue(last.targetPx > 0f)
+        assertEquals(last.startsPx.last() + rowHeights.last().toFloat() / 2f +
+            last.topPaddingPx - 175f, last.targetPx, 1f)
+    }
+
+    @Test fun variableBilingualHeightsAndSmallScreensDoNotShiftCurrentLyricDown() {
+        for (viewport in listOf(245, 310, 410, 620)) {
+            val heights = listOf(34, 135, 77, 115, 48, 91, 36)
+            for (index in heights.indices) {
+                val layout = lyricScrollGeometry(viewport, heights, 14, index)
+                val center = layout.topPaddingPx + layout.startsPx[index] -
+                    layout.targetPx + heights[index] / 2f
+                assertEquals(viewport / 2f, center, 1.1f)
+            }
+        }
+        val one = lyricScrollGeometry(200, listOf(60), 14, 0)
+        assertEquals(0f, one.targetPx, .01f)
+    }
+
+    @Test fun lyricsUseMeasuredRowsAndPositiveAbsoluteScrollInsteadOfNegativeOffset() {
+        val file = listOf(
+            File("src/main/java/com/webdav/album/GreenMusicPlayerUi.kt"),
+            File("app/src/main/java/com/webdav/album/GreenMusicPlayerUi.kt"),
+        ).first { it.isFile }.readText()
+        val panel = file.substringAfter("private fun GreenMusicLyricPanel(")
+            .substringBefore("private fun MusicPlayerButtons(")
+        assertTrue(panel.contains("lyricScrollGeometry("))
+        assertTrue(panel.contains("observedRowHeights[i] = size.height"))
+        assertTrue(panel.contains("measurer.measure("))
+        assertTrue(panel.contains("scrollState.animateScrollBy("))
+        assertFalse(panel.contains("scrollOffset = -"))
+        assertFalse(panel.contains("112.dp"))
+        assertFalse(panel.contains("196.dp"))
+        assertTrue(panel.contains("collectIsDraggedAsState"))
+    }
+
+    @Test fun adjacentLyricChangesKeepAnimatedScrollingRegardlessOfStaggerSetting() {
+        assertEquals(300, lyricAutoScrollDurationMs(2, 3, true, true))
+        assertEquals(260, lyricAutoScrollDurationMs(2, 3, true, false))
+        assertEquals(260, lyricAutoScrollDurationMs(3, 2, true, false))
+        assertEquals(300, lyricAutoScrollDurationMs(0, 4, true, true))
+        assertEquals(0, lyricAutoScrollDurationMs(0, 5, true, true))
+        assertEquals(0, lyricAutoScrollDurationMs(3, 3, true, true))
+        assertEquals(0, lyricAutoScrollDurationMs(3, 4, false, true))
+    }
+
+    @Test fun lyricHeightRemeasureCannotCancelTheActiveScrollAnimation() {
+        val file = listOf(
+            File("src/main/java/com/webdav/album/GreenMusicPlayerUi.kt"),
+            File("app/src/main/java/com/webdav/album/GreenMusicPlayerUi.kt"),
+        ).first { it.isFile }.readText()
+        val panel = file.substringAfter("private fun GreenMusicLyricPanel(")
+            .substringBefore("private fun MusicPlayerButtons(")
+        assertFalse("Row-height remeasurement must not cancel scrolling",
+            panel.contains("LaunchedEffect(lyric.lines, current, rowHeights"))
+        assertFalse("Dragging must not accidentally re-key natural song scrolling",
+            panel.contains("LaunchedEffect(lyric.lines, current, rowHeights, viewportPx, dragged)"))
+        assertTrue(panel.contains("val latestGeometry by rememberUpdatedState(geometry)"))
+        assertTrue(panel.contains("lyricAutoScrollDurationMs("))
+        assertTrue(panel.contains("scrollState.animateScrollBy("))
+        assertTrue(panel.contains("durationMillis = durationMs"))
+        assertTrue(panel.contains("withFrameNanos"))
+        assertTrue(panel.contains("top = with(density) { geometry.topPaddingPx.toDp() }"))
+        assertTrue(panel.contains("bottom = with(density) { geometry.bottomPaddingPx.toDp() }"))
+    }
+
+    @Test fun coldFirstOpenDoesNotComposeOffscreenLyricsOrDecodePaletteOnMainThread() {
+        val ui = listOf(
+            File("src/main/java/com/webdav/album/GreenMusicPlayerUi.kt"),
+            File("app/src/main/java/com/webdav/album/GreenMusicPlayerUi.kt"),
+        ).first { it.isFile }.readText()
+        val switcher = listOf(
+            File("src/main/java/com/webdav/album/GreenMusicAlbumLyricsSwitcher.kt"),
+            File("app/src/main/java/com/webdav/album/GreenMusicAlbumLyricsSwitcher.kt"),
+        ).first { it.isFile }.readText()
+        val transition = listOf(
+            File("src/main/java/com/webdav/album/GreenMusicPlayerTransition.kt"),
+            File("app/src/main/java/com/webdav/album/GreenMusicPlayerTransition.kt"),
+        ).first { it.isFile }.readText()
+        assertTrue(switcher.contains("if (lyricsVisible || dragging || x < -1f)"))
+        assertTrue(ui.contains("MusicArtworkPaletteCache.cached("))
+        assertTrue(ui.contains("MusicArtworkPaletteCache.getOrPrepare("))
+        assertTrue(transition.contains("MusicArtworkPaletteCache.getOrPrepare("))
+    }
+
     @Test fun miniPlayerGlassMatchesReviewNavigationOpticalTints() {
         for (dark in listOf(false, true)) {
             for (translucent in listOf(false, true)) {

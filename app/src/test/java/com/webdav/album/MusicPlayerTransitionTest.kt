@@ -36,7 +36,7 @@ class MusicPlayerTransitionTest {
         ).first { it.isFile }.readText()
             .substringAfter("internal fun GreenMusicMiniPlayer(")
             .substringBefore("/** Glyph boxes")
-        assertTrue(transition.contains("renderGlassBackground = !fillOwnsBoundary"))
+        assertTrue(transition.contains("renderGlassBackground = !fullTarget"))
         assertTrue(transition.contains("rememberSharedContentState(key = \"music-cover\")"))
         assertTrue(transition.contains("rememberSharedContentState(key = \"music-title\")"))
         assertTrue(mini.contains("val glassDecoration = if (renderGlassBackground)"))
@@ -67,23 +67,22 @@ class MusicPlayerTransitionTest {
         assertEquals(0f, capsuleGlassStrength(2f), .0001f)
     }
 
-    @Test fun opticalSurfaceAndCurvedCornersShareOneAnimatedBoundary() {
+    @Test fun fullscreenCapsuleUsesOnlyCheapDrawPhaseWorkNotResizedGpuLens() {
         val source = listOf(
             java.io.File("src/main/java/com/webdav/album/GreenMusicPlayerTransition.kt"),
             java.io.File("app/src/main/java/com/webdav/album/GreenMusicPlayerTransition.kt"),
         ).first { it.isFile }.readText()
-        val glass = listOf(
-            java.io.File("src/main/java/com/webdav/album/ReviewMiniPlayerBackdrop.kt"),
-            java.io.File("app/src/main/java/com/webdav/album/ReviewMiniPlayerBackdrop.kt"),
-        ).first { it.isFile }.readText()
         assertTrue(source.contains("label = \"player-capsule-horizontal-fill\""))
         assertTrue(source.contains("label = \"player-capsule-visible-corner-unfold\""))
         assertTrue(source.contains("corners = fillCorners"))
-        assertTrue(source.contains("reviewMorphingPlayerBackdrop("))
-        assertTrue(source.contains("glassIntensity = if (miniTokens.mode"))
-        assertTrue(source.contains("drawRect(fillBackground.copy(alpha = 1f - glassIntensity))"))
-        assertTrue(glass.contains("val optics = (24f * k).coerceAtLeast(.05f)"))
-        assertTrue(glass.contains("shape = { shape }"))
+        assertTrue(source.contains(".drawWithContent {"))
+        assertTrue(source.contains("clipPath(outline)"))
+        assertTrue(source.contains("lerp("))
+        assertTrue(source.contains("renderGlassBackground = !fullTarget"))
+        assertFalse("Never rebuild a variable-size GPU lens on the UI thread",
+            source.contains("reviewMorphingPlayerBackdrop("))
+        assertFalse(source.contains("lensBounds"))
+        assertFalse(source.contains(".size(lensWidth, lensHeight)"))
     }
 
     @Test fun aboutPageOnlyPresentsLucentUiInDesignAndTechnology() {
@@ -97,25 +96,19 @@ class MusicPlayerTransitionTest {
         assertFalse(section.contains("LucentRow(\"音频播放\""))
     }
 
-    @Test fun lensUsesOnlySupportedRoundedShapeInsteadOfGenericShape() {
-        // Regression: OPPO PME110, WebAlbum 1.3.20, 2026-11-17 16:27:
-        // UnsupportedOperationException: Only RoundedRectangularShape or
-        // CornerBasedShape is supported in lens effects.
+    @Test fun glassLensRemainsOnlyOnTheStableMiniPlayer() {
         val transition = listOf(
             java.io.File("src/main/java/com/webdav/album/GreenMusicPlayerTransition.kt"),
             java.io.File("app/src/main/java/com/webdav/album/GreenMusicPlayerTransition.kt"),
         ).first { it.isFile }.readText()
-        val shader = listOf(
+        val mini = listOf(
             java.io.File("src/main/java/com/webdav/album/ReviewMiniPlayerBackdrop.kt"),
             java.io.File("app/src/main/java/com/webdav/album/ReviewMiniPlayerBackdrop.kt"),
         ).first { it.isFile }.readText()
         assertFalse(transition.contains("val movingBoundaryShape = GenericShape"))
-        assertTrue(transition.contains("val lensShape = RoundedCornerShape(lensRadius)"))
-        assertTrue(transition.contains("shape = lensShape"))
-        assertTrue(transition.contains(".size(lensWidth, lensHeight)"))
-        assertTrue(transition.contains("lensBounds.left.roundToInt()"))
-        assertTrue(shader.contains("shape: CornerBasedShape"))
-        assertTrue(shader.contains("lens(optics, optics)"))
+        assertFalse(transition.contains("val lensShape = RoundedCornerShape(lensRadius)"))
+        assertTrue(mini.contains("shape = { RoundedCornerShape(24.dp) }"))
+        assertTrue(mini.contains("lens(24.dp.toPx(), 24.dp.toPx())"))
     }
 
     @Test fun capsuleFillStartsAtExactMiniPlayerPosition() {
@@ -160,7 +153,7 @@ class MusicPlayerTransitionTest {
         ).first { it.isFile }.readText()
         assertTrue(src.contains("player-capsule-fast-top-edge"))
         assertTrue(src.contains("player-capsule-short-bottom-edge"))
-        assertTrue(src.contains("clipPath(capsule)"))
+        assertTrue(src.contains("clipPath(outline)"))
         assertTrue(src.contains("capsuleFillGeometry("))
         val full = src.substringAfter("val enterFull =")
             .substringBefore("val reopen by")

@@ -15,17 +15,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.shape.RoundedCornerShape
-import android.os.Build
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.unit.IntOffset
-import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.platform.LocalDensity
@@ -177,6 +172,15 @@ internal fun GreenMusicPlayerTransition(
 ) {
     val state by music.state.collectAsState()
     val hasTrack = state.current != null
+    // The first fullscreen open previously initialized palette and both
+    // album/lyric pages together. Precompute the per-cover tonal palette
+    // while the mini-player is idle; no GL layers or fullscreen UI are kept
+    // rendering in the background.
+    val paletteTrack = state.current
+    LaunchedEffect(paletteTrack?.scopeId, paletteTrack?.artwork) {
+        val artwork = paletteTrack?.artwork ?: return@LaunchedEffect
+        MusicArtworkPaletteCache.getOrPrepare(paletteTrack.scopeId, artwork, false)
+    }
     val motion = LocalLucentStyle.current.motion
     val miniTarget = shouldShowMiniPlayer(
         available, hasTrack, prefs.musicMiniPlayer, expanded, miniDismissed,
@@ -277,91 +281,55 @@ internal fun GreenMusicPlayerTransition(
 
     val fillBackground = MaterialTheme.colorScheme.surface
     val miniTokens = rememberMiniPlayerGlassTokens()
-    val glassIntensity = if (miniTokens.mode == MiniPlayerGlassMode.SOLID) 0f
-        else capsuleGlassStrength(fillCorners)
     val navigationBottom = WindowInsets.navigationBars.asPaddingValues()
         .calculateBottomPadding()
+
+    // GreenMusic's successful transition avoids remeasuring the full player
+    // every animation frame. Keep the shape entirely in DRAW scope: the four
+    // independent motion curves only invalidate this canvas, not the
+    // BoxWithConstraints measurement / Kyant lens shader pipeline.
+    //
+    // Rendering a moving, resizable Kyant lens required rebuilding a GPU
+    // backdrop for each intermediate shape. That was the main first-open
+    // regression on small devices. The mini retains its normal optical glass;
+    // the moving capsule uses a cheap interpolated material tint. On closing
+    // the real mini glass fades in during the final segment.
     SharedTransitionLayout(modifier = modifier) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val pixelDensity = density.density
             val navPx = with(density) { navigationBottom.toPx() }
             val liftPx = with(density) { lift.toPx() }
-            // Lens in Kyant Backdrop only accepts rounded-rect/corner-based
-            // Shapes, NOT GenericShape.  Measure the optical card as a REAL
-            // rounded rectangle and move/resize it to the same dynamic bounds
-            // as the parent clip.  This also prevents the effect from drawing
-            // outside the expanding capsule.
-            val lensBounds = capsuleFillGeometry(
-                width = with(density) { maxWidth.toPx() },
-                height = with(density) { maxHeight.toPx() },
-                density = pixelDensity,
-                navBottomPx = navPx, liftPx = liftPx,
-                head = fillHead, foot = fillFoot, sides = fillSides,
-                corners = fillCorners,
-            )
-            val lensWidth = with(density) {
-                (lensBounds.right - lensBounds.left).coerceAtLeast(1f).toDp()
-            }
-            val lensHeight = with(density) {
-                (lensBounds.bottom - lensBounds.top).coerceAtLeast(1f).toDp()
-            }
-            val lensRadius = with(density) { lensBounds.radius.toDp() }
-            val lensShape = RoundedCornerShape(lensRadius)
-            val opticalMaterial = if (
-                Build.VERSION.SDK_INT >= 33 &&
-                miniTokens.mode != MiniPlayerGlassMode.SOLID
-            ) Modifier.reviewMorphingPlayerBackdrop(
-                dark = miniTokens.primary.luminance() > .5f,
-                translucent = miniTokens.mode == MiniPlayerGlassMode.CLEAR,
-                strength = glassIntensity,
-                shape = lensShape,
-            ) else Modifier
             AnimatedVisibility(
                 visibleState = fullVisibility,
                 modifier = Modifier.fillMaxSize().drawWithContent {
-                    val box = capsuleFillGeometry(
+                    val geometry = capsuleFillGeometry(
                         width = size.width, height = size.height,
                         density = pixelDensity,
                         navBottomPx = navPx, liftPx = liftPx,
-                        head = fillHead, foot = fillFoot, sides = fillSides,
-                        corners = fillCorners,
+                        head = fillHead, foot = fillFoot,
+                        sides = fillSides, corners = fillCorners,
                     )
-                    val capsule = Path().apply {
-                        addRoundRect(
-                            RoundRect(
-                                Rect(box.left, box.top, box.right, box.bottom),
-                                CornerRadius(box.radius, box.radius),
+                    val outline = Path().apply {
+                        addRoundRect(RoundRect(
+                            Rect(
+                                geometry.left, geometry.top,
+                                geometry.right, geometry.bottom,
                             ),
-                        )
+                            CornerRadius(geometry.radius, geometry.radius),
+                        ))
                     }
-                    // One continuous filled pill, expanding upward and
-                    // slightly downward to cover the whole music screen.
-                    // Clip BOTH the background and controls: no sliding page
-                    // is visible outside the transforming glass boundary.
-                    clipPath(capsule) {
-                        // Crossfade only the material *inside* the sole moving
-                        // boundary.  At the mini endpoint the Review shader is
-                        // fully visible; at fullscreen the normal surface wins.
-                        drawRect(fillBackground.copy(alpha = 1f - glassIntensity))
+                    val materialProgress = fillCorners.coerceIn(0f, 1f)
+                    val color = androidx.compose.ui.graphics.lerp(
+                        miniTokens.fill, fillBackground, materialProgress,
+                    )
+                    clipPath(outline) {
+                        drawRect(color)
                         this@drawWithContent.drawContent()
                     }
                 },
                 enter = enterFull,
                 exit = exitFull,
             ) {
-                Box(Modifier.fillMaxSize()) {
-                    if (glassIntensity > .001f && miniTokens.mode != MiniPlayerGlassMode.SOLID) {
-                        Box(
-                            Modifier.offset {
-                                IntOffset(
-                                    lensBounds.left.roundToInt(),
-                                    lensBounds.top.roundToInt(),
-                                )
-                            }
-                                .size(lensWidth, lensHeight)
-                                .then(opticalMaterial),
-                        )
-                    }
                 val coverModifier = with(this@SharedTransitionLayout) {
                     Modifier.sharedElement(
                         rememberSharedContentState(key = "music-cover"),
@@ -379,7 +347,6 @@ internal fun GreenMusicPlayerTransition(
                     music, prefs, onCollapse, expanded = expanded,
                     artworkModifier = coverModifier, titleModifier = titleModifier,
                 )
-                } // fullscreen content and its sole lens-safe glass surface
             }
 
             AnimatedVisibility(
@@ -407,7 +374,11 @@ internal fun GreenMusicPlayerTransition(
                 GreenMusicMiniPlayer(
                     music, onExpand, onDismissMini, Modifier.fillMaxWidth(),
                     artworkModifier = coverModifier, titleModifier = titleModifier,
-                    renderGlassBackground = !fillOwnsBoundary,
+                    // At close the mini is already fading in only during
+                    // the final part of the outline collapse; draw its real
+                    // Review glass in that same fade instead of suddenly
+                    // enabling it after the animation is entirely finished.
+                    renderGlassBackground = !fullTarget,
                 )
             }
 
