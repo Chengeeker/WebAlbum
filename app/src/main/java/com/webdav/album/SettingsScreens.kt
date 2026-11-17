@@ -42,7 +42,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 private fun SettingsScaffold(title: String, onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     BackdropHost(overlay = { LucentHeader(title, onBack) }) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, end = 16.dp, top = 72.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
+            .padding(start = 16.dp, end = 16.dp, top = 72.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
 }
 
@@ -50,25 +50,25 @@ private fun SettingsScaffold(title: String, onBack: () -> Unit, content: @Compos
 fun SettingsHome(prefs: AlbumPreferences, connection: Connection?, lock: AppLock, onBack: () -> Unit, open: (String) -> Unit) {
     val revision = lock.revision
     SettingsScaffold("设置", onBack) {
-        LucentSection("偏好与功能") { LucentRow("个性化", "主题、字体与图库布局", Icons.Outlined.Palette, onClick = { open("appearance") }) }
-        LucentSection("音乐播放") {
-            LucentRow("音乐播放器", "GreenMusic 风格播放器、迷你播放器、队列与内嵌歌词",
-                Icons.Outlined.LibraryMusic, onClick = { open("musicSettings") })
+        // Personalisation and music belong to one concise action group.
+        LucentSection("偏好与功能") {
+            LucentRow("个性化", icon = Icons.Outlined.Palette, onClick = { open("appearance") })
+            LucentRow("音乐播放器", icon = Icons.Outlined.LibraryMusic, onClick = { open("musicSettings") })
         }
         LucentSection("存储与连接") {
             LucentRow("WebDAV 连接", connection?.root?.host ?: "尚未连接", Icons.Outlined.Cloud, onClick = { open("connection") })
             LucentRow("默认打开文件夹", connection?.let { prefs.defaultFolder(it)?.let(::folderName) ?: "WebDAV 根目录" } ?: "请先连接 WebDAV",
                 Icons.Outlined.FolderOpen, enabled = connection != null, onClick = { open("folder") })
-            LucentRow("存储设置", "选择图片、视频与音乐保存位置", Icons.Outlined.Download, onClick = { open("storage") })
-            LucentRow("缓存管理", "查看和清理临时图片", Icons.Outlined.CleaningServices, onClick = { open("cache") })
-            LucentRow("本地备份与迁移", "导出或恢复非敏感设置", Icons.Outlined.Save, onClick = { open("backup") })
-            LucentRow("网络设置", "超时与代理", Icons.Outlined.Wifi, onClick = { open("network") })
+            LucentRow("存储设置", icon = Icons.Outlined.Download, onClick = { open("storage") })
+            LucentRow("缓存管理", icon = Icons.Outlined.CleaningServices, onClick = { open("cache") })
+            LucentRow("本地备份与迁移", icon = Icons.Outlined.Save, onClick = { open("backup") })
+            LucentRow("网络设置", icon = Icons.Outlined.Wifi, onClick = { open("network") })
         }
         LucentSection("隐私与安全") {
             LucentRow("应用锁", if (remember(revision) { lock.enabled }) "已开启" else "未开启", Icons.Outlined.Lock, onClick = { open("lock") })
             LucentToggle("截图保护", prefs.privacy, prefs::updatePrivacy, "禁止截图及最近任务预览")
         }
-        LucentSection("关于与支持") { LucentRow("关于 WebAlbum", "版本 ${BuildConfig.VERSION_NAME} · 基于 LucentUI", Icons.Outlined.Info) }
+        LucentSection("关于与支持") { LucentRow("关于 WebAlbum", icon = Icons.Outlined.Info, onClick = { open("about") }) }
     }
 }
 
@@ -170,7 +170,7 @@ fun AppearancePage(prefs: AlbumPreferences, locked: Boolean, onBack: () -> Unit,
             LucentToggle("使用液态玻璃效果", style.glass, { prefs.updateStyle(style.copy(glass = it)) }, "应用于图片查看器和悬浮操作栏")
             if (style.glass && !locked) NavigationGlassChoice(style.translucent, hapticsEnabled = style.haptics) { prefs.updateStyle(style.copy(translucent = it)) }
         }
-        LucentSection("应用图标") { LucentRow("自定义应用图标", listOf("圆润", "清浅", "深邃")[prefs.icon], Icons.Outlined.AppShortcut, onClick = { open("icons") }) }
+        LucentSection("应用图标") { LucentRow("应用图标", icon = Icons.Outlined.AppShortcut, onClick = { open("icons") }) }
         LucentSection("屏幕显示") { LucentRow("屏幕帧率设置", if (prefs.refresh == 0) "系统默认" else "${prefs.refresh} Hz", Icons.Outlined.Speed, onClick = { open("refresh") }) }
         LucentSection("手势与动效") {
             LucentToggle("界面动画", style.motion, { prefs.updateStyle(style.copy(motion = it)) }, "跟随系统动画设置")
@@ -184,24 +184,34 @@ fun AppearancePage(prefs: AlbumPreferences, locked: Boolean, onBack: () -> Unit,
 fun ColumnsPage(prefs: AlbumPreferences, folder: Boolean, onBack: () -> Unit) {
     SettingsScaffold(if (folder) "文件夹每行显示数量" else "图片与视频每行显示数量", onBack) {
         LucentSection(if (folder) "文件夹列数" else "媒体列数") {
-            (1..5).forEach { value -> LucentRow("$value 列", onClick = { if (folder) prefs.updateFolderColumns(value) else prefs.updateColumns(value) }, trailing = { RadioButton((if (folder) prefs.folderColumns else prefs.columns) == value, null) }) }
+            (1..5).forEach { value ->
+                LucentOptionRow("$value 列",
+                    selected = (if (folder) prefs.folderColumns else prefs.columns) == value,
+                ) {
+                    if (folder) prefs.updateFolderColumns(value) else prefs.updateColumns(value)
+                }
+            }
         }
     }
 }
 
 @Composable
 fun IconSettingsPage(prefs: AlbumPreferences, onBack: () -> Unit, report: (String) -> Unit) {
-    val context = LocalContext.current
-    SettingsScaffold("自定义应用图标", onBack) {
-        LucentSection("应用图标") {
-            listOf("圆润", "清浅", "深邃").forEachIndexed { index, name ->
-                SettingsTile(headlineContent = { Text(name, style = MaterialTheme.typography.titleMedium) },
-                    leadingContent = { Image(painterResource(listOf(R.drawable.ic_album, R.drawable.ic_album_light, R.drawable.ic_album_dark)[index]), null, Modifier.size(48.dp)) },
-                    trailingContent = { RadioButton(prefs.icon == index, null) },
-                    modifier = Modifier.lucentClick { runCatching { prefs.setIcon(context, index) }.onFailure { report("切换图标失败，请稍后重试") } })
-            }
+    SettingsScaffold("应用图标", onBack) {
+        LucentSection("当前图标") {
+            // All historical launcher aliases share this single brand mark.
+            SettingsTile(
+                headlineContent = { Text("WebAlbum", style = MaterialTheme.typography.titleMedium) },
+                leadingContent = {
+                    Image(
+                        painter = painterResource(R.drawable.webalbum_icon),
+                        contentDescription = "WebAlbum 当前应用图标",
+                        modifier = Modifier.size(56.dp),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    )
+                },
+            )
         }
-        Text("桌面图标的刷新时间由系统桌面决定。", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -212,7 +222,9 @@ fun RefreshSettingsPage(prefs: AlbumPreferences, activity: MainActivity, onBack:
     SettingsScaffold("屏幕帧率设置", onBack) {
         LucentSection("屏幕帧率") {
             (listOf(0) + rates).forEach { rate ->
-                LucentRow(if (rate == 0) "系统默认" else "$rate Hz", onClick = { prefs.updateRefresh(rate) }, trailing = { RadioButton(prefs.refresh == rate, null) })
+                LucentOptionRow(if (rate == 0) "系统默认" else "$rate Hz",
+                    selected = prefs.refresh == rate,
+                ) { prefs.updateRefresh(rate) }
             }
         }
         Text("系统会根据设备状态决定实际刷新率。", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -240,7 +252,11 @@ fun CacheSettingsPage(prefs: AlbumPreferences, locked: Boolean, onBack: () -> Un
         }
     }
     if (threshold && !locked) AlertDialog(onDismissRequest = { threshold = false }, title = { Text("启动时自动清理阈值") }, text = {
-        Column { listOf(0, 16, 64, 256, 512, 1024).forEach { value -> LucentRow(if (value == 0) "关闭" else "$value MiB", onClick = { prefs.updateCacheThreshold(value); threshold = false }, trailing = { RadioButton(prefs.cacheThreshold == value, null) }) } }
+        Column { listOf(0, 16, 64, 256, 512, 1024).forEach { value ->
+            LucentOptionRow(if (value == 0) "关闭" else "$value MiB",
+                selected = prefs.cacheThreshold == value,
+            ) { prefs.updateCacheThreshold(value); threshold = false }
+        } }
     }, confirmButton = { TextButton(onClick = hapticClick { threshold = false }) { Text("取消") } })
     if (confirm && !locked) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("清理图片缓存？") },
         text = { Text("不会删除服务器文件和已下载的图片。") },
@@ -256,11 +272,13 @@ fun NetworkSettingsPage(prefs: AlbumPreferences, app: AlbumApplication, onBack: 
     var port by remember { mutableStateOf(prefs.network.port.toString()) }
     SettingsScaffold("网络设置", onBack) {
         LucentSection("超时（秒）") {
-            listOf(15, 30, 60).forEach { value -> LucentRow("$value 秒", onClick = { timeout = value }, trailing = { RadioButton(timeout == value, null) }) }
+            listOf(15, 30, 60).forEach { value ->
+                LucentOptionRow("$value 秒", selected = timeout == value) { timeout = value }
+            }
         }
         LucentSection("连接方式") {
             listOf("system" to "系统", "direct" to "直连", "http" to "HTTP 代理").forEach { (value, label) ->
-                LucentRow(label, onClick = { mode = value }, trailing = { RadioButton(mode == value, null) })
+                LucentOptionRow(label, selected = mode == value) { mode = value }
             }
             if (mode == "http") {
                 OutlinedTextField(host, { host = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), label = { Text("HTTP 代理主机") }, singleLine = true,

@@ -18,6 +18,7 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -27,6 +28,24 @@ import kotlin.math.sign
  * Adapted from GreenMusic.ui.SwipeFrame: elastic horizontal song switching,
  * fling-threshold-aware finishing and cubic bezier settlement.
  */
+/** Down-swipe must dominate horizontal song-switch gestures. */
+internal fun isMiniPlayerDismissSwipe(
+    deltaX: Float, deltaY: Float, minimumDown: Float,
+    velocityY: Float = 0f, minimumFling: Float = Float.POSITIVE_INFINITY,
+): Boolean {
+    val downDominates = deltaY > 0 && deltaY > kotlin.math.abs(deltaX) * 1.05f
+    return downDominates && (deltaY >= minimumDown ||
+        (deltaY >= minimumDown * .55f && velocityY >= minimumFling))
+}
+
+/** Do not permanently lock out a slightly diagonal initial gesture.
+ * Positive = vertical dismissal, negative = horizontal skip, zero = undecided. */
+internal fun miniPlayerSwipeIntent(dx: Float, dy: Float, slop: Float): Int = when {
+    dy > slop && dy > abs(dx) * 1.05f -> 1
+    abs(dx) > slop && abs(dx) > abs(dy) * 1.45f -> -1
+    else -> 0
+}
+
 @Composable
 internal fun GreenMusicSwipeFrame(
     key: Any,
@@ -44,13 +63,29 @@ internal fun GreenMusicSwipeFrame(
     var dragging by remember { mutableStateOf(false) }
     var settling by remember { mutableStateOf<Job?>(null) }
     var previousKey by remember { mutableStateOf(key) }
+    var awaitingTrack by remember { mutableStateOf(false) }
     LaunchedEffect(key) {
         if (previousKey != key) {
-            previousKey = key
             settling?.cancel()
+            awaitingTrack = false
             dragging = false
             distance = 0f
             progress.snapTo(0f)
+            // Keep key != previousKey until the progress reset completes.
+            // Otherwise a delayed snap could render the old offset once.
+            previousKey = key
+        }
+    }
+    // A WebDAV/Media3 selection can take one or more frames. Keep the NEXT
+    // song onscreen at the completed swipe position until the model's key
+    // advances. This prevents a frame of the old song snapping back.
+    LaunchedEffect(awaitingTrack, key) {
+        if (awaitingTrack) {
+            delay(2500)
+            if (awaitingTrack && previousKey == key) {
+                awaitingTrack = false
+                progress.animateTo(0f, tween(180))
+            }
         }
     }
     BoxWithConstraints(modifier.clipToBounds()) {
@@ -67,11 +102,20 @@ internal fun GreenMusicSwipeFrame(
                     if (commit) -step * width else 0f,
                     tween(220, easing = CubicBezierEasing(.215f, .61f, .355f, 1f)),
                 )
-                if (commit) currentOnChange(step) else distance = 0f
-                progress.snapTo(0f)
+                if (commit) {
+                    // Do not snap back until the selected track actually changes.
+                    awaitingTrack = true
+                    currentOnChange(step)
+                } else {
+                    distance = 0f
+                    progress.snapTo(0f)
+                }
             }
         }
-        val offset = if (dragging) distance else progress.value
+        // When the NEW key first reaches composition, render it at x=0 even
+        // before LaunchedEffect(key) has reset the old Animatable.
+        val offset = if (key != previousKey) 0f
+            else if (dragging) distance else progress.value
         Box(Modifier.fillMaxSize().pointerInput(key, width) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -84,9 +128,12 @@ internal fun GreenMusicSwipeFrame(
                     val change = event.changes.firstOrNull { it.id == down.id } ?: break
                     val delta = change.position - down.position
                     tracker.addPosition(change.uptimeMillis, change.position)
-                    if (!horizontal && !vertical && delta.getDistance() > 18.dp.toPx()) {
-                        horizontal = abs(delta.x) > abs(delta.y)
-                        vertical = !horizontal
+                    if (!horizontal && !vertical) {
+                        val intent = miniPlayerSwipeIntent(
+                            delta.x, delta.y, 14.dp.toPx(),
+                        )
+                        horizontal = intent == -1
+                        vertical = intent == 1
                         if (horizontal) {
                             settling?.cancel()
                             dragging = true

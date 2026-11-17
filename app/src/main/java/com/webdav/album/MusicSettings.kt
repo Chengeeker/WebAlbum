@@ -42,30 +42,74 @@ internal fun MusicSettingsPage(
         ) {
             LucentSection("播放与交互") {
                 LucentToggle("显示迷你播放器", prefs.musicMiniPlayer, prefs::updateMusicMiniPlayer,
-                    "参考 GreenMusic：封面、歌曲信息、迷你歌词、横滑切歌与进度条")
+                    "参考 GreenMusic：封面、歌曲信息、迷你歌词与横滑切歌",
+                    icon = Icons.Outlined.Smartphone)
                 LucentToggle("允许后台继续播放", prefs.musicKeepBackground, prefs::updateMusicKeepBackground,
-                    "使用媒体播放服务；关闭时应用进入后台会暂停")
+                    "使用媒体播放服务；关闭时应用进入后台会暂停",
+                    icon = Icons.Outlined.Headphones)
                 LucentToggle("预加载相邻歌曲", prefs.musicPreloadEnabled, prefs::updateMusicPreloadEnabled,
-                    "提前缓存上一首和下一首各约 768 KiB，减少 WebDAV 切歌等待；使用额外网络流量")
+                    "提前缓存上一首和下一首各约 768 KiB，减少 WebDAV 切歌等待；使用额外网络流量",
+                    icon = Icons.Outlined.Download)
+                LucentChoiceRow(
+                    title = "收起后重新显示迷你播放器",
+                    value = prefs.musicMiniRecovery,
+                    icon = Icons.Outlined.MusicNote,
+                    enabled = prefs.musicMiniPlayer,
+                    options = MiniPlayerRecovery.entries.map { mode ->
+                        LucentChoice(mode, mode.label, mode.description)
+                    },
+                    onSelect = prefs::updateMusicMiniRecovery,
+                    supportingText = "顶栏音乐按钮始终可以手动恢复",
+                )
+                LucentChoiceRow(
+                    title = "播放进度条样式",
+                    value = prefs.musicProgressWavy,
+                    icon = Icons.Outlined.Tune,
+                    options = listOf(
+                        LucentChoice(false, "直线（默认）", "原有线性轨道及拖动体验"),
+                        LucentChoice(true, "波浪线", "已播放部分为波浪，未播放部分为直线"),
+                    ),
+                    onSelect = prefs::updateMusicProgressWavy,
+                )
                 LucentRow("主题与动画", "沿用 WebAlbum 个性化中的主题色、动效和触感设置",
                     Icons.Outlined.Palette)
             }
             LucentSection("歌词界面") {
-                LucentRow("歌词字体大小", prefs.musicLyricsFontSize.toString() + " sp",
-                    Icons.Outlined.TextFields, onClick = {
-                        val next = listOf(16, 18, 20, 24, 28, 32, 36, 40)
-                        val idx = next.indexOf(prefs.musicLyricsFontSize)
-                        prefs.updateMusicLyricsFontSize(next[(idx+1).coerceAtLeast(0) % next.size])
-                    })
-                LucentRow("歌词文字粗细", prefs.musicLyricsWeight.toString(),
-                    Icons.Outlined.FormatBold, onClick = {
-                        prefs.updateMusicLyricsWeight(if (prefs.musicLyricsWeight >= 800) 400 else prefs.musicLyricsWeight+100)
-                    })
-                LucentToggle("居中显示歌词", prefs.musicLyricsCenter, prefs::updateMusicLyricsCenter)
+                LucentToggle("居中显示歌词", prefs.musicLyricsCenter, prefs::updateMusicLyricsCenter,
+                    icon = Icons.Outlined.FormatAlignCenter)
                 LucentToggle("非当前行降低对比度", prefs.musicLyricsBlur, prefs::updateMusicLyricsBlur,
-                    "参考 GreenMusic 的模糊层次，减少视觉干扰")
+                    "参考 GreenMusic 的模糊层次，减少视觉干扰",
+                    icon = Icons.Outlined.BlurOn)
                 LucentToggle("歌词滚动动画", prefs.musicLyricsStagger, prefs::updateMusicLyricsStagger,
-                    "跟随播放进度平滑切换歌词行")
+                    "跟随播放进度平滑切换歌词行",
+                    icon = Icons.Outlined.AutoAwesome)
+                LucentChoiceRow(
+                    title = "歌词字体大小",
+                    value = prefs.musicLyricsFontSize,
+                    icon = Icons.Outlined.TextFields,
+                    options = listOf(16, 18, 20, 24, 28, 32, 36, 40)
+                        .map { LucentChoice(it, "$it sp") },
+                    onSelect = prefs::updateMusicLyricsFontSize,
+                )
+                LucentChoiceRow(
+                    title = "歌词文字粗细",
+                    value = prefs.musicLyricsWeight,
+                    icon = Icons.Outlined.FormatBold,
+                    options = (100..900 step 100)
+                        .map { LucentChoice(it, "$it") },
+                    onSelect = prefs::updateMusicLyricsWeight,
+                )
+
+                LucentChoiceRow(
+                    title = "卡拉 OK 逐字歌词",
+                    value = prefs.musicLyricKaraoke,
+                    icon = Icons.Outlined.Lyrics,
+                    options = MusicKaraokeMode.entries.map { mode ->
+                        LucentChoice(mode, mode.label, mode.description)
+                    },
+                    onSelect = prefs::updateMusicLyricKaraoke,
+                    supportingText = "优先使用真实逐字时间；估算动画不代表实际演唱时间",
+                )
             }
             LucentSection("后台通知") {
                 LucentRow("播放通知权限",

@@ -68,6 +68,36 @@ class MusicMediaAndLyricsTest {
         assertEquals("测试唱片",tags.album)
         assertEquals(3250L,parseMusicLyrics(tags.lyrics).lines.single().timeMs)
     }
+    @Test fun separateId3UnsynchronizedLyricFramesKeepBothLanguages() {
+        val data = id3(
+            frame("USLT", byteArrayOf(3) + "chi".toByteArray() + byteArrayOf(0) +
+                "[00:03.20]你好".toByteArray()),
+            frame("USLT", byteArrayOf(3) + "eng".toByteArray() + byteArrayOf(0) +
+                "[00:03.20]Hello".toByteArray()),
+        )
+        val parsed = parseMusicLyrics(parseEmbeddedMusicTags(data).lyrics)
+        assertEquals(1, parsed.lines.size)
+        assertEquals("你好", parsed.lines.single().text)
+        assertEquals("Hello", parsed.lines.single().translation)
+    }
+
+    @Test fun flacTwoLyricCommentsKeepOriginalAndTranslation() {
+        val tagged = parseEmbeddedMusicTags(flac(listOf(
+            "TITLE=Song", "LYRICS=[00:02.00]世界", "LYRICS=[00:02.00]World",
+        )))
+        val parsed = parseMusicLyrics(tagged.lyrics)
+        assertEquals("世界", parsed.lines.single().text)
+        assertEquals("World", parsed.lines.single().translation)
+    }
+
+    @Test fun externalSidecarAndEmbeddedTextAreCombinedByTimestamp() {
+        val external = "[00:04.00]Hello"
+        val embedded = "[00:04.00]你好\\n[00:04.00]Hello"
+        val result = parseMusicLyrics(external, embedded.replace("\\n", "\n"))
+        assertEquals("Hello", result.lines.single().text)
+        assertEquals("你好", result.lines.single().translation)
+    }
+
     @Test fun multilineLrcOffsetAndRepeatedTimestamps() {
         val lyrics=parseMusicLyrics("[offset:250]\n[00:05.00][00:10.50]重复歌词")
         assertEquals(listOf(5250L,10750L),lyrics.lines.map { it.timeMs })

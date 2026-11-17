@@ -85,9 +85,21 @@ internal fun galleryDoubleTapScale(scale: Float, long: Boolean): Float = when {
 
 private val galleryCurve = CubicBezierEasing(.215f, .61f, .355f, 1f)
 
+/** Choose a visible return flight even when rapid swiping outruns image decoding. */
+internal enum class GalleryReturnVisual { PAGE, THUMBNAIL, PLACEHOLDER }
+internal fun galleryReturnVisual(pageReady: Boolean, thumbnailReady: Boolean): GalleryReturnVisual =
+    when {
+        pageReady -> GalleryReturnVisual.PAGE
+        thumbnailReady -> GalleryReturnVisual.THUMBNAIL
+        else -> GalleryReturnVisual.PLACEHOLDER
+    }
+
+
+
 @Composable
 fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, GalleryOrigin> = emptyMap(), onClose: () -> Unit, saving: Boolean = false,
     resolveMotion: (suspend (GalleryMedia) -> String?)? = null, originalLoader: GalleryOriginalLoader? = null,
+    onPageSettled: (Int) -> Unit = {}, prepareReturn: suspend (Int) -> Unit = {},
     onSave: (GalleryMedia) -> Unit) {
     require(media.isNotEmpty())
     val initial = start.coerceIn(media.indices)
@@ -99,6 +111,21 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
     val motion = remember { GalleryOpeningMotion(scope, if (openingAnchor != null && openingImage != null) 0f else 1f) }
     var flight by remember { mutableStateOf<GalleryFlight?>(null) }
     var returnGeneration by remember { mutableIntStateOf(0) }
+    var preparingReturn by remember { mutableStateOf(false) }
+    // The settled page changes only when a fling ENDS. During rapid swipes the
+    // return destination must follow the CURRENT page immediately.
+    LaunchedEffect(pager.currentPage) {
+        onPageSettled(pager.currentPage)
+    }
+    // Used only when neither the full page nor the grid thumbnail has decoded
+    // yet. Still morph a visible card back instead of dropping the animation.
+    val returnPlaceholder = remember {
+        Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+            .apply { eraseColor(android.graphics.Color.rgb(57, 59, 63)) }
+    }
+    // The filmstrip may decode a small real preview before the remote full
+    // image finishes. Reuse it as the return-flight bitmap when possible.
+    val filmstripBitmaps = remember { mutableMapOf<Int, Bitmap>() }
     var viewport by remember { mutableStateOf(Rect.Zero) }
     val pagePlanes = remember { mutableMapOf<Int, () -> GalleryPlane?>() }
     val closing = motion.returning
@@ -116,22 +143,50 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
         }
     }
     fun close() {
-        if (motion.returning) return
-        if (flight == null || motion.position >= 1f) {
-            val page = pager.currentPage
-            val source = sources[page]
-            val anchor = source?.anchor()
-            val plane = pagePlanes[page]?.invoke()
-            flight = if (source != null && anchor != null && plane != null) GalleryFlight(source, anchor, plane) else null
-            pager.requestScrollToPage(page)
-        }
-        val generation = ++returnGeneration
-        motion.returnToSource {
-            flight?.source?.covered = false
-            scope.launch {
-                withFrameNanos {}
-                snapshotFlow { !motion.holdingGesture || !motion.returning || generation != returnGeneration }.first { it }
-                if (motion.returning && generation == returnGeneration) onClose()
+        if (motion.returning || preparingReturn) return
+        preparingReturn = true
+        scope.launch {
+            try {
+                val page = pager.currentPage
+                // Freeze an in-progress fling to the page the user is returning
+                // from, before the asynchronous list positioning step.
+                pager.requestScrollToPage(page)
+                prepareReturn(page)
+                if (flight == null || motion.position >= 1f) {
+                    val source = sources[page]
+                    val anchor = source?.anchor()
+                    // Fast swipes can outrun OriginalImage's decode; in that
+                    // case use the thumbnail bitmap already in memory.
+                    val thumbnail = source?.bitmap?.takeUnless(Bitmap::isRecycled)
+                        ?: filmstripBitmaps[page]?.takeUnless(Bitmap::isRecycled)
+                    val decoded = pagePlanes[page]?.invoke()
+                    val plane = when (galleryReturnVisual(decoded != null, thumbnail != null)) {
+                        GalleryReturnVisual.PAGE -> requireNotNull(decoded)
+                        GalleryReturnVisual.THUMBNAIL -> requireNotNull(thumbnail).let { bitmap ->
+                            GalleryPlane(bitmap,
+                                galleryImagePlane(viewport,
+                                    Size(bitmap.width.toFloat(), bitmap.height.toFloat()), crop = false),
+                                viewport)
+                        }
+                        GalleryReturnVisual.PLACEHOLDER ->
+                            GalleryPlane(returnPlaceholder, viewport, viewport)
+                    }
+                    flight = if (source != null && anchor != null)
+                        GalleryFlight(source, anchor, plane) else null
+                }
+                val generation = ++returnGeneration
+                motion.returnToSource {
+                    flight?.source?.covered = false
+                    scope.launch {
+                        withFrameNanos {}
+                        snapshotFlow {
+                            !motion.holdingGesture || !motion.returning || generation != returnGeneration
+                        }.first { it }
+                        if (motion.returning && generation == returnGeneration) onClose()
+                    }
+                }
+            } finally {
+                preparingReturn = false
             }
         }
     }
@@ -236,7 +291,7 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
             },
         ).graphicsLayer { alpha = if (closing && !morphing) motion.position else 1f }
             .background(Color.Black.copy(alpha = motion.position * (1f - dragFraction).coerceIn(0f, 1f)))) {
-            HorizontalPager(pager, userScrollEnabled = !zoomed && !videoFullscreen && !closing && !morphing,
+            HorizontalPager(pager, userScrollEnabled = !zoomed && !videoFullscreen && !closing && !preparingReturn && !morphing,
                 modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (morphing) 0f else 1f }.recordBackdrop(mediaBackdrop), beyondViewportPageCount = 0) { page ->
                 val picture = media[page]
                 if (picture.video.isNotBlank()) {
@@ -384,7 +439,16 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().windowInsetsPadding(bottomInsets)
                     .padding(start = 12.dp, end = 12.dp, bottom = if (videoThumbnail && videoControlsHeight > 0)
                         with(density) { videoControlsHeight.toDp() } + 8.dp else 32.dp),
-                onScrolling = { thumbnailScrolling = it }, onUserDrag = { playingMotion = false })
+                onScrolling = { thumbnailScrolling = it }, onUserDrag = { playingMotion = false },
+                onThumbnailReady = { index, bitmap ->
+                    if (!bitmap.isRecycled) {
+                        filmstripBitmaps[index] = bitmap
+                        if (filmstripBitmaps.size > 16) {
+                            filmstripBitmaps.keys.sortedBy { abs(it - pager.currentPage) }
+                                .drop(16).forEach { filmstripBitmaps.remove(it) }
+                        }
+                    }
+                })
 
 
         }
@@ -399,7 +463,8 @@ private fun galleryRatio(media: GalleryMedia): Float = if (media.width > 0 && me
 
 @Composable
 internal fun GalleryThumbnails(media: List<GalleryMedia>, pager: androidx.compose.foundation.pager.PagerState, modifier: Modifier,
-    onScrolling: (Boolean) -> Unit, onUserDrag: () -> Unit = {}) {
+    onScrolling: (Boolean) -> Unit, onUserDrag: () -> Unit = {},
+    onThumbnailReady: (Int, Bitmap) -> Unit = { _, _ -> }) {
     val list = rememberLazyListState(pager.currentPage)
     val dragged by list.interactionSource.collectIsDraggedAsState()
     val mainDragged by pager.interactionSource.collectIsDraggedAsState()
@@ -442,7 +507,7 @@ internal fun GalleryThumbnails(media: List<GalleryMedia>, pager: androidx.compos
                     Box(Modifier.fillMaxSize().padding(2.dp).clip(RoundedCornerShape(6.dp))) {
                         val image = Modifier.fillMaxSize()
                         GalleryMediaImage(item.copy(url = item.preview.ifBlank { item.url }),
-                            if (item.video.isNotBlank()) "第 ${index + 1} 个视频封面" else "第 ${index + 1} 张图片", image)
+                            if (item.video.isNotBlank()) "第 ${index + 1} 个视频封面" else "第 ${index + 1} 张图片", image, onBitmap = { bitmap -> onThumbnailReady(index, bitmap) })
                         if (item.video.isNotBlank()) Icon(Icons.Rounded.PlayCircle, null,
                             Modifier.align(Alignment.Center).size(20.dp), tint = Color.White)
                         if (item.duration.isNotBlank()) Text(item.duration,
@@ -466,8 +531,13 @@ data class GalleryMedia(val url: String, val preview: String = "", val width: In
     val long: Boolean = false, val gif: Boolean = false, val hdr: Boolean = false, val description: String = "图片",
     val video: String = "", val duration: String = "")
 
-@Composable private fun GalleryMediaImage(media: GalleryMedia, description: String, modifier: Modifier) {
-    coil.compose.AsyncImage(media.url, description, modifier, contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+@Composable private fun GalleryMediaImage(
+    media: GalleryMedia, description: String, modifier: Modifier,
+    onBitmap: ((Bitmap) -> Unit)? = null,
+) {
+    coil.compose.AsyncImage(media.url, description, modifier,
+        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        onSuccess = { state -> onBitmap?.invoke(state.result.drawable.galleryBitmap()) })
 }
 
 @Composable private fun OriginalImage(

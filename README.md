@@ -22,7 +22,7 @@ WebAlbum 的定位是一款轻量的 **WebDAV 媒体浏览与播放应用**，�
 - **原图高清浏览**：查看器新增底部居中的「加载原图」半透明胶囊，可复用或下载完整原始文件并显示进度；放大到约 1.6 倍时按当前视野解码高清区域，不再只是放大低分辨率预览。胶囊与顶部控件共用液态玻璃设置及触觉反馈。已识别的 Ultra HDR 图片暂不叠加可能丢失增益图的普通区域解码层。
 - **按需缓存**：图片封面与预览使用本地缓存；无需预先下载整个远程图库。
 
-### 音乐播放（1.3.2 新增）
+### 音乐播放（持续更新）
 - **WebDAV 音乐识别**：识别 MP3、FLAC、M4A、AAC、OGG、OPUS、WAV 等常见扩展名；实际解码取决于设备与服务器，同目录歌曲组成播放队列。
 - **GreenMusic 风格播放器**：复用自有项目 [GreenMusic](https://github.com/Chengeeker/GreenMusic) 的交互设计，适配迷你播放器、全屏专辑图、歌词视图、队列、渐变背景及动画。
 - **连续可打断动画**：播放器收起过程中可以点击迷你播放器，从当前共享封面、标题位置反向展开；收起时快速淡出非核心控件。
@@ -45,15 +45,24 @@ WebAlbum 的定位是一款轻量的 **WebDAV 媒体浏览与播放应用**，�
 - **应用保护**：支持 PIN / 生物识别等应用锁选项以及截图保护。
 - **偏好备份**：可导出与恢复部分非敏感设置；备份不包含 WebDAV 密码等私密连接数据。
 
+## 1.5.0 主要更新
+
+- **全新应用图标**：统一桌面、关于页和应用内预览的水彩风格图标，保持原图比例。
+- **更紧凑的设置页**：精简无必要说明文字，将「音乐播放器」与「个性化」归入同一功能分组，并缩小小标题与卡片间距。
+- **音乐播放器交互**：新增胶囊填充式迷你播放器展开/收起动画，与 Review/Kyant Backdrop 玻璃效果逐步过渡；支持直接在迷你播放器内查看、滚动与关闭播放队列。
+- **切歌及手势**：优化左右切歌的封面连续性、短距离下滑关闭与小屏触控方向识别。
+- **歌词与音频信息**：完善歌词显示、歌曲元信息与播放器相关设置。
+- **兼容性修复**：修复先前展开播放器时自定义图形与 Kyant lens 不兼容导致的闪退；正式签名保持不变。
+
 ## 下载与安装
 
 从 [GitHub Releases](https://github.com/Chengeeker/WebAlbum/releases) 下载正式 APK：
 
-**[下载 WebAlbum v1.3.2（arm64-v8a）](https://github.com/Chengeeker/WebAlbum/releases/download/v1.3.2/WebAlbum_v1.3.2_arm64-v8a.apk)**
+**[下载 WebAlbum v1.5.0（arm64-v8a）](https://github.com/Chengeeker/WebAlbum/releases/download/v1.5.0/WebAlbum_v1.5.0_arm64-v8a.apk)**
 
 | 项目 | 要求 |
 | --- | --- |
-| 当前版本 | **1.3.2**（Version Code 18） |
+| 当前版本 | **1.5.0**（Version Code 38） |
 | Android | **8.0（API 26）或以上** |
 | 架构 | **arm64-v8a** |
 | 应用包名 | `com.webdav.album` |
@@ -95,7 +104,7 @@ README.en.md          English documentation
 
 ## 版本状态与限制
 
-v1.3.2 已通过正式签名构建与 103 项主机端单元测试（0 失败）。音乐播放器的连续反向动画、后台通知、蓝牙控制及真实 WebDAV 切歌速度仍需真机验证；M4A 内嵌歌词也有未支持的格式。欢迎通过 [Issues](https://github.com/Chengeeker/WebAlbum/issues) 反馈。
+v1.5.0 已通过正式签名构建与 180 项主机端单元测试（0 失败）。音乐播放器的连续反向动画、后台通知、蓝牙控制及真实 WebDAV 切歌速度仍需真机验证；M4A 内嵌歌词也有未支持的格式。欢迎通过 [Issues](https://github.com/Chengeeker/WebAlbum/issues) 反馈。
 
 ## 开源与致谢
 

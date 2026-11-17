@@ -1,5 +1,7 @@
 package com.webdav.album
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -47,6 +49,31 @@ class WebDavMusicMetadataTest {
                 assertEquals(7210L,result.lines.single().timeMs)
                 assertEquals(1,server.requestCount)
             } finally { app.connection = null }
+        }
+    }
+
+    @Test fun twoMetadataConsumersWaitForOneSharedRequest() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(206)
+                .setBody("ID3\\u0003\\u0000\\u0000\\u0000\\u0000\\u0000\\u0000")
+                .setBodyDelay(150, java.util.concurrent.TimeUnit.MILLISECONDS))
+            server.start()
+            val app = RuntimeEnvironment.getApplication() as AlbumApplication
+            val connection = Connection(server.url("/dav/").toString(), "alice", "pw")
+            app.connection = connection
+            try {
+                val track = MusicTrack(server.url("/dav/shared.mp3").toString(), "v1", "shared.mp3")
+                val playback = WebAlbumMusicPlayback(app)
+                val results = listOf(
+                    async { playback.warmTags(track, connection); playback.cachedTags(track, connection) },
+                    async { playback.warmTags(track, connection); playback.cachedTags(track, connection) },
+                ).awaitAll()
+                assertEquals(1, server.requestCount)
+                assertTrue("both rows must wait for the same completed metadata probe",
+                    results.all { it != null })
+            } finally {
+                app.connection = null
+            }
         }
     }
 

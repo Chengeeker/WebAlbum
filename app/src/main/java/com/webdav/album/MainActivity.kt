@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -30,10 +31,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import dev.chengeeker.lucent.review.recordBackdrop
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.input.pointer.pointerInput
@@ -66,6 +70,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
+/** A finished cover decode; null image means no supported artwork. */
+internal data class MusicListArtwork(
+    val image: androidx.compose.ui.graphics.ImageBitmap?,
+)
+
 @OptIn(ExperimentalAnimationApi::class, coil.annotation.ExperimentalCoilApi::class, androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, activity: MainActivity, session: LockSession) {
@@ -80,6 +89,26 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
     val music = remember(app) { app.music }
     val musicState by music.state.collectAsState()
     var musicExpanded by remember { mutableStateOf(false) }
+    // Session-only: swiping the bar down hides UI but does not stop MediaSession.
+    var miniDismissed by rememberSaveable { mutableStateOf(false) }
+    // A restored mini bar slides upwards; fullscreen-to-mini uses shared elements.
+    var miniRevealFromBottom by remember { mutableStateOf(false) }
+    var observedMusicTrack by remember { mutableStateOf(musicState.current?.scopeId) }
+    var observedMusicPlaying by remember { mutableStateOf(musicState.playing) }
+    // A mini-player dismissal is UI-only. Only the selected reappearance policy
+    // (or a conscious tap on the top-bar action / new music file) may undo it.
+    LaunchedEffect(musicState.current?.scopeId, musicState.playing, prefs.musicMiniRecovery) {
+        val currentTrack = musicState.current?.scopeId
+        val switched = observedMusicTrack != null && currentTrack != null &&
+            observedMusicTrack != currentTrack
+        val resumed = !observedMusicPlaying && musicState.playing && currentTrack != null
+        if (shouldRestoreMini(prefs.musicMiniRecovery, miniDismissed, switched, resumed)) {
+            miniRevealFromBottom = true
+            miniDismissed = false
+        }
+        observedMusicTrack = currentTrack
+        observedMusicPlaying = musicState.playing
+    }
     val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!granted) message = "未获得通知权限，系统可能不会显示音乐通知；可在系统设置中重新授权。"
     }
@@ -94,6 +123,10 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
     }
     var gallery by remember { mutableStateOf<Pair<List<GalleryMedia>, Int>?>(null) }
     var origins by remember { mutableStateOf<Map<Int, GalleryOrigin>>(emptyMap()) }
+    var galleryCurrentIndex by remember { mutableStateOf<Int?>(null) }
+    var galleryPrepareReturn by remember {
+        mutableStateOf<(suspend (Int) -> Unit)?>(null)
+    }
     var pending by remember { mutableStateOf<GalleryMedia?>(null) }
     var saving by remember { mutableStateOf(false) }
     var selecting by remember { mutableStateOf(false) }
@@ -250,7 +283,14 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
             if (routes.lastOrNull() === route) back()
         } finally { route.backProgress = null }
     }
+    // Record only the page underneath the mini-player, never the mini
+    // itself: the two glass modes now have a live source without feedback.
+    val miniBackdropLayer = rememberGraphicsLayer()
+    val miniBackdrop = remember(miniBackdropLayer) {
+        dev.chengeeker.lucent.review.ReviewBackdrop(miniBackdropLayer)
+    }
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Box(Modifier.fillMaxSize().recordBackdrop(miniBackdrop)) {
         PageStack(routes.toList()) { route ->
             when (route.name) {
                 "root" -> {
@@ -271,8 +311,8 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                         }
                     }
                     else BrowsePage(config, folders, snapshots, prefs.columns, prefs.folderColumns, prefs.showMediaNames, prefs.compactMediaNames,
-                        musicState.current != null && prefs.musicMiniPlayer, music, prefs.sortMode, prefs.sortDescending, captureTimes, loading, folderError, selecting, selected,
-                        onBack = { load(folders.dropLast(1)) }, onFolder = { load(folders + it.url) },
+                        musicState.current != null && prefs.musicMiniPlayer && !miniDismissed && !musicExpanded, music, prefs.sortMode, prefs.sortDescending, captureTimes, loading, folderError, selecting, selected,
+                         onBack = { load(folders.dropLast(1)) }, onFolder = { load(folders + it.url) },
                         onRefresh = { cancelPrefetch(); folderCache.clear(); load(folders, force = true) }, onSettings = { open("settings") },
                         onSelection = { item -> selecting = true; if (item.url in selected) selected.remove(item.url) else selected.add(item.url) },
                         onSelectMode = { selecting = !selecting; selected.clear() },
@@ -293,8 +333,22 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                             val items = entries.filter { it.url in selected }
                             if (!loading && !saving && items.isNotEmpty()) when (action) { 0 -> download(items); 1 -> properties = items; 2 -> confirmDelete = true }
                         },
-                        onGallery = { media, index, source -> origins = source; gallery = media to index },
+                         galleryCurrentIndex = galleryCurrentIndex,
+                        musicDismissed = miniDismissed && musicState.current != null && prefs.musicMiniPlayer,
+                        onRestoreMusic = {
+                            miniRevealFromBottom = true
+                            miniDismissed = false
+                            musicExpanded = false // restore the mini card, not fullscreen
+                        },
+                        onGallery = { media, index, source, prepare ->
+                             origins = source
+                             galleryPrepareReturn = prepare
+                             galleryCurrentIndex = index
+                             gallery = media to index
+                         },
                         onAudio = { tracks, index ->
+                            miniRevealFromBottom = miniDismissed
+                            miniDismissed = false
                             val activeConnection = connection
                             if (activeConnection != null && !locked) {
                                 requestMusicNotification()
@@ -306,6 +360,7 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                         })
                 }
                 "settings" -> SettingsHome(prefs, connection, lock, ::back, ::open)
+                "about" -> AboutWebAlbumPage(::back)
                 "musicSettings" -> MusicSettingsPage(prefs, ::back, ::requestMusicNotification)
                 "appearance" -> AppearancePage(prefs, locked, ::back, ::open)
                 "columns" -> ColumnsPage(prefs, false, ::back)
@@ -352,17 +407,45 @@ fun AlbumScreen(app: AlbumApplication, prefs: AlbumPreferences, lock: AppLock, a
                 }
             }
         }
+        }
+        CompositionLocalProvider(
+            dev.chengeeker.lucent.review.LocalBackdrop provides miniBackdrop,
+        ) {
         GreenMusicPlayerTransition(
             music = music, prefs = prefs, expanded = musicExpanded,
             available = !locked && gallery == null,
-            onExpand = { musicExpanded = true },
-            onCollapse = { musicExpanded = false },
+            miniDismissed = miniDismissed,
+            selecting = selecting && routes.lastOrNull()?.name == "root",
+            revealFromBottom = miniRevealFromBottom,
+            onExpand = {
+                miniRevealFromBottom = false
+                miniDismissed = false
+                musicExpanded = true
+            },
+            onCollapse = {
+                miniRevealFromBottom = false
+                musicExpanded = false
+            },
+            onDismissMini = {
+                miniRevealFromBottom = true
+                miniDismissed = true
+            },
             modifier = Modifier.fillMaxSize(),
         )
+        }
     gallery?.takeIf { !locked }?.let { (media, index) ->
             CompositionLocalProvider(LocalVideoDataSource provides videoFactory) {
-                ReviewGallery(media, index, origins, onClose = { gallery = null }, saving = saving,
-                    resolveMotion = resolveMotion, originalLoader = originalLoader, onSave = { item ->
+                ReviewGallery(media, index, origins,
+                    onClose = {
+                        gallery = null
+                        galleryCurrentIndex = null
+                        galleryPrepareReturn = null
+                    },
+                    saving = saving,
+                    resolveMotion = resolveMotion, originalLoader = originalLoader,
+                    onPageSettled = { page -> galleryCurrentIndex = page },
+                    prepareReturn = { page -> galleryPrepareReturn?.invoke(page) },
+                    onSave = { item ->
                     val entry = entries.firstOrNull { it.url == (item.video.ifBlank { item.url }).substringBefore('#') }
                     if (entry != null && prefs.downloadTree.isNotBlank()) download(listOf(entry))
                     else { pending = item; save.launch(item.description.ifBlank { "image.jpg" }) }
@@ -422,7 +505,10 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
     showMediaNames: Boolean, compactMediaNames: Boolean, miniVisible: Boolean, music: WebAlbumMusicPlayback, sortMode: AlbumSort, sortDescending: Boolean, captureTimes: Map<String, Long>, loading: Boolean, folderError: String?, selecting: Boolean, selected: List<String>, onBack: () -> Unit, onFolder: (DavItem) -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit,
     onSelection: (DavItem) -> Unit, onSelectMode: () -> Unit, onSelectAll: () -> Unit, onAction: (Int) -> Unit,
     onColumnsChange: (Int) -> Unit, onSortChange: (AlbumSort) -> Unit, onRangeSelection: (Int, Int, Boolean) -> Unit,
-    onGallery: (List<GalleryMedia>, Int, Map<Int, GalleryOrigin>) -> Unit,
+    galleryCurrentIndex: Int?,
+    musicDismissed: Boolean,
+    onRestoreMusic: () -> Unit,
+    onGallery: (List<GalleryMedia>, Int, Map<Int, GalleryOrigin>, suspend (Int) -> Unit) -> Unit,
     onAudio: (List<MusicTrack>, Int) -> Unit) {
     val direction = if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1 else 1
     val motion = LocalLucentStyle.current.motion
@@ -450,6 +536,25 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
         }
         val sourceMap = remember(photos) { mutableMapOf<Int, GalleryOrigin>() }
         val gridState = rememberLazyGridState()
+        suspend fun revealGalleryImage(index: Int, ensureAnchor: Boolean = false) {
+            val target = galleryGridItemIndex(folderItems.size, photos.size, index)
+                ?: return
+            if (path != folders) return
+            if (gridState.layoutInfo.visibleItemsInfo.none { it.index == target })
+                gridState.scrollToItem(target)
+            // Follow EVERY current page without spending 12 frames waiting.
+            // Only an actual return requests an attached thumbnail origin.
+            if (ensureAnchor) repeat(4) {
+                withFrameNanos {}
+                if (gridState.layoutInfo.visibleItemsInfo.any { it.index == target } &&
+                    sourceMap[index]?.coordinates?.isAttached == true) return
+            }
+        }
+        LaunchedEffect(galleryCurrentIndex, photos, path, folders, loading) {
+            val index = galleryCurrentIndex
+            if (index != null && !loading && path == folders)
+                revealGalleryImage(index)
+        }
         val scope = rememberCoroutineScope()
         var moreOpen by remember { mutableStateOf(false) }
         var columnsOpen by remember { mutableStateOf(false) }
@@ -467,6 +572,9 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
                         LucentIcon(Icons.Outlined.SelectAll, "全选", onClick = onSelectAll)
                         LucentIcon(Icons.Outlined.Close, "取消选择", onClick = onSelectMode)
                     } else {
+                        if (musicDismissed) {
+                            LucentIcon(Icons.Outlined.LibraryMusic, "重新打开音乐播放器", onClick = onRestoreMusic)
+                        }
                         Box {
                             LucentIcon(Icons.Outlined.GridView, "每行媒体数量", onClick = { columnsOpen = true })
                             DropdownMenu(expanded = columnsOpen, onDismissRequest = { columnsOpen = false },
@@ -519,9 +627,28 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
                         }
                     }
                 })
-            if (selecting && path == folders) Box(Modifier.align(Alignment.BottomCenter)) { ReviewBottomBar(-1, floating = true, glass = LocalLucentStyle.current.glass, translucent = LocalLucentStyle.current.translucent,
-                names = listOf("下载", "属性", "删除"), inactive = listOf(Icons.Outlined.Download, Icons.Outlined.Info, Icons.Outlined.Delete),
-                active = listOf(Icons.Outlined.Download, Icons.Outlined.Info, Icons.Outlined.Delete), select = onAction) }
+            // The bottom action bar is stationary: MINI rises first, then this
+            // bar fades in. On exit the bar fades out before MINI lowers.
+            AnimatedVisibility(
+                visible = selecting && path == folders,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter = if (motion) fadeIn(tween(
+                    MiniSelectionMotionTiming.BAR_FADE_IN_MS,
+                    delayMillis = if (miniVisible) MiniSelectionMotionTiming.BAR_FADE_IN_DELAY_MS else 0,
+                )) else EnterTransition.None,
+                exit = if (motion) fadeOut(tween(
+                    MiniSelectionMotionTiming.BAR_FADE_OUT_MS,
+                )) else ExitTransition.None,
+            ) {
+                    ReviewBottomBar(-1, floating = true,
+                        glass = LocalLucentStyle.current.glass,
+                        translucent = LocalLucentStyle.current.translucent,
+                        names = listOf("下载", "属性", "删除"),
+                        inactive = listOf(Icons.Outlined.Download, Icons.Outlined.Info, Icons.Outlined.Delete),
+                        active = listOf(Icons.Outlined.Download, Icons.Outlined.Info, Icons.Outlined.Delete),
+                        select = onAction,
+                    )
+            }
         }) {
             val gridUnits = (1..20).first { it % columns == 0 && it % folderColumns == 0 }
             val mediaStart = folderItems.size + if (folderItems.isNotEmpty() && mediaItems.isNotEmpty()) 1 else 0
@@ -570,7 +697,8 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
                     }
                 },
                 contentPadding = PaddingValues(start = 13.dp, end = 13.dp, top = 13.dp,
-                    bottom = (if (selecting) 96.dp else if (miniVisible) 112.dp else 21.dp) +
+                    bottom = (if (selecting) 96.dp + selectionBarClearance(miniVisible)
+                            else if (miniVisible) 106.dp else 21.dp) +
                         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())) {
                 items(folderItems, key = { it.url }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(gridUnits / folderColumns) }) { folder ->
                     FolderCard(folder, folderColumns, !loading && path == folders) { onFolder(folder) }
@@ -581,7 +709,10 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
                     val namedCard = showMediaNames && columns <= 3
                     val openOrSelect: () -> Unit = {
                         if (!loading && path == folders) {
-                            if (selecting) onSelection(item) else onGallery(photos, index, sourceMap)
+                            if (selecting) onSelection(item)
+                            else onGallery(photos, index, sourceMap) { target ->
+                                revealGalleryImage(target, ensureAnchor = true)
+                            }
                         }
                     }
                     Column(
@@ -641,23 +772,41 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
                         val item = audioEntries[index]
                         val musicTrack = audioQueue[index]
                         val mediaTags = visibleMusicTags[config.videoScope + "|" + musicTrack.scopeId]
+                        var tagProbeFinished by remember(config.videoScope, musicTrack.scopeId) {
+                            mutableStateOf(false)
+                        }
                         LaunchedEffect(config.videoScope, item.url, item.version) {
                             try {
+                                // Keep this card in its fixed-size placeholder state
+                                // until its own or a coalesced metadata probe completes.
                                 music.warmTags(musicTrack, config)
                             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                                 throw cancelled
                             } catch (_: Exception) {
-                                // The filename and default artwork remain usable offline.
+                                // No tags / temporary WebDAV failure: readable filename fallback.
+                            } finally {
+                                tagProbeFinished = true
                             }
                         }
                         val track = remember(musicTrack, mediaTags) {
-                            if (mediaTags == null) musicTrack else musicTrack.copy(
-                                title = mediaTags.title.ifBlank { musicTrack.title },
-                                artist = mediaTags.artist.ifBlank { musicTrack.artist },
-                                album = mediaTags.album.ifBlank { musicTrack.album },
-                                artwork = mediaTags.cover,
+                            musicListTrack(musicTrack, mediaTags)
+                        }
+                        val artworkBytes = mediaTags?.cover
+                        val artwork = remember(artworkBytes) {
+                            mutableStateOf<MusicListArtwork?>(
+                                if (artworkBytes == null) MusicListArtwork(null) else null,
                             )
                         }
+                        LaunchedEffect(artworkBytes) {
+                            if (artworkBytes != null) {
+                                artwork.value = withContext(Dispatchers.Default) {
+                                    MusicListArtwork(decodeMusicArtwork(artworkBytes))
+                                }
+                            }
+                        }
+                        // Render cover/title/artist as one settled card, never
+                        // "MP3 · WebDAV" then swap fields one by one.
+                        val tagsReady = (mediaTags != null || tagProbeFinished) && artwork.value != null
                         LucentCard(Modifier.padding(horizontal = 3.dp, vertical = 3.dp)) {
                             Row(
                                 Modifier.fillMaxWidth()
@@ -673,15 +822,33 @@ private fun BrowsePage(config: Connection, folders: List<String>, snapshots: Map
                                     .padding(horizontal = 12.dp, vertical = 9.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                GreenMusicCover(track, Modifier.size(48.dp), 14.dp)
+                                if (tagsReady) {
+                                    GreenMusicCover(track, Modifier.size(48.dp), 14.dp,
+                                        decodedForList = artwork.value?.image, listArtworkReady = true)
+                                } else {
+                                    Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant))
+                                }
                                 Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(track.title,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.bodyLarge)
-                                    Text(track.artist.ifBlank { item.name.substringAfterLast('.', "").uppercase() + " · WebDAV" },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                                    if (tagsReady) {
+                                        Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodyLarge)
+                                        Text(track.artist,
+                                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    } else {
+                                        // Match the final two-line geometry with neutral
+                                        // loading bars, not false codec/server metadata.
+                                        Box(Modifier.fillMaxWidth(.68f).height(16.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant))
+                                        Spacer(Modifier.height(6.dp))
+                                        Box(Modifier.fillMaxWidth(.38f).height(13.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant))
+                                    }
                                 }
                                 Icon(if (selecting) {
                                     if (item.url in selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked
@@ -746,3 +913,19 @@ private fun ConnectionPage(initial: Connection?, loading: Boolean, onCancel: (()
         }
     }
 }
+
+/** LazyGrid item indices include folders and a full-span media separator. */
+internal fun galleryGridItemIndex(folderCount: Int, mediaCount: Int, mediaIndex: Int): Int? {
+    if (folderCount < 0 || mediaCount <= 0 || mediaIndex !in 0 until mediaCount) return null
+    val separator = if (folderCount > 0) 1 else 0
+    return folderCount + separator + mediaIndex
+}
+
+
+/**
+ * Compact mini content: 58dp row + 10dp surrounding vertical padding = 68dp.
+ * Add enough grid scroll clearance behind the two stacked bottom surfaces.
+ * Music progress style affects only FULLSCREEN and no longer changes this.
+ */
+internal fun selectionBarClearance(miniVisible: Boolean): androidx.compose.ui.unit.Dp =
+    if (miniVisible) 86.dp else 0.dp

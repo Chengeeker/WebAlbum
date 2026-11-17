@@ -10,31 +10,149 @@ import java.io.IOException
 import java.nio.charset.Charset
 import kotlin.coroutines.coroutineContext
 
-data class MusicLyricLine(val timeMs: Long, val text: String)
+data class MusicLyricWord(val text: String, val timeMs: Long, val endMs: Long? = null)
+
+/** Original and translation always share ONE time/index; not two rival timed rows. */
+data class MusicLyricLine(
+    val timeMs: Long,
+    val text: String,
+    val translation: String = "",
+    val words: List<MusicLyricWord> = emptyList(),
+)
 data class MusicLyrics(val lines: List<MusicLyricLine> = emptyList(), val plain: String = "") {
     val isTimed: Boolean get() = lines.isNotEmpty()
 }
 data class EmbeddedMusicTags(
     val title: String = "", val artist: String = "", val album: String = "",
-    val lyrics: String = "", val cover: ByteArray? = null
+    val lyrics: String = "", val cover: ByteArray? = null,
 )
 
-internal fun parseMusicLyrics(raw: String): MusicLyrics {
-    val content = raw.trim().take(256 * 1024)
-    val pattern = Regex("""\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]""")
-    val offset = Regex("""(?i)\[offset:([+-]?\d+)\]""").find(content)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-    val lines = content.lineSequence().flatMap { row ->
-        val marks = pattern.findAll(row).toList()
-        val text = marks.lastOrNull()?.let { row.substring(it.range.last + 1).trim() }.orEmpty()
-        if (text.isBlank()) emptySequence() else marks.asSequence().mapNotNull { m ->
-            val minutes = m.groupValues[1].toLongOrNull() ?: return@mapNotNull null
-            val seconds = m.groupValues[2].toLongOrNull() ?: return@mapNotNull null
-            val millis = m.groupValues[3].let { if (it.isEmpty()) 0L else it.padEnd(3, '0').take(3).toLongOrNull() ?: 0L }
-            MusicLyricLine(((minutes * 60 + seconds) * 1000 + millis + offset).coerceAtLeast(0), text)
-        }
-    }.sortedBy { it.timeMs }.take(2000).toList()
-    return if (lines.isEmpty()) MusicLyrics(plain = content) else MusicLyrics(lines, content)
+enum class MusicKaraokeMode(val key: String, val label: String, val description: String) {
+    OFF("off", "关闭", "仅高亮当前整行，不播放逐字动画"),
+    TIMED("timed", "仅真实逐字", "只有歌词提供逐字时间戳时播放逐字动画"),
+    SONG("song", "拓展同首歌词", "歌曲含真实逐字时间戳时，其余行按行长估算动画"),
+    ALL("all", "拓展全部行（默认）", "所有歌曲都可逐字显示；无时间戳时按行时长估算");
+    companion object {
+        fun from(value: String?): MusicKaraokeMode = entries.firstOrNull { it.key == value } ?: ALL
+    }
 }
+
+internal fun parseMusicLyrics(raw: String, translationRaw: String = ""): MusicLyrics {
+    val content = raw.trim().take(256 * 1024)
+    val rowTag = Regex("""\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]""")
+    val wordTag = Regex("""<(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?>""")
+    val offsetTag = Regex("""(?i)\[offset:([+-]?\d+)\]""")
+    fun stamp(match: MatchResult): Long {
+        val minutes = match.groupValues[1].toLongOrNull() ?: 0L
+        val seconds = match.groupValues[2].toLongOrNull() ?: 0L
+        val millis = match.groupValues[3].let { if (it.isEmpty()) 0L else it.padEnd(3, '0').take(3).toLongOrNull() ?: 0L }
+        return (minutes * 60 + seconds) * 1000 + millis
+    }
+    fun parse(input: String): List<MusicLyricLine> {
+        val offset = offsetTag.find(input)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+        return input.lineSequence().flatMap { row ->
+            val marks = rowTag.findAll(row).toList()
+            if (marks.isEmpty()) return@flatMap emptySequence()
+            val contentText = row.substring(marks.last().range.last + 1).trim()
+            val clean = wordTag.replace(contentText, "").trim()
+            if (clean.isEmpty()) return@flatMap emptySequence()
+            val wordMarkers = wordTag.findAll(contentText).toList()
+            marks.asSequence().map { match ->
+                val time = (stamp(match) + offset).coerceAtLeast(0L)
+                var valid = wordMarkers.isNotEmpty() &&
+                    contentText.substring(0, wordMarkers.first().range.first).isBlank()
+                val words = mutableListOf<MusicLyricWord>()
+                for ((i, marker) in wordMarkers.withIndex()) {
+                    if (!valid) break
+                    val start = (stamp(marker) + offset).coerceAtLeast(0L)
+                    val end = wordMarkers.getOrNull(i + 1)?.let { (stamp(it) + offset).coerceAtLeast(0L) }
+                    if (start < time || end != null && end < start) { valid = false; break }
+                    var text = contentText.substring(
+                        marker.range.last + 1,
+                        wordMarkers.getOrNull(i + 1)?.range?.first ?: contentText.length,
+                    )
+                    if (i == 0) text = text.trimStart()
+                    if (i == wordMarkers.lastIndex) text = text.trimEnd()
+                    if (text.isNotEmpty()) words += MusicLyricWord(text, start, end)
+                }
+                MusicLyricLine(time, clean, words = if (valid && words.joinToString("") { it.text } == clean)
+                    words else emptyList())
+            }
+        }.sortedBy { it.timeMs }.take(2000).toList()
+    }
+    // Common bilingual LRC repeats [00:xx.xx] for original and translation.
+    // Fold these into a single line so current-line selection NEVER skips either.
+    val grouped = linkedMapOf<Long, MutableList<MusicLyricLine>>()
+    for (line in parse(content)) grouped.getOrPut(line.timeMs) { mutableListOf() }.add(line)
+    val translationCandidates = if (translationRaw.isBlank()) emptyMap()
+        else parse(translationRaw.take(256 * 1024)).groupBy { it.timeMs }
+    val lines = grouped.map { (time, parts) ->
+        val main = parts.first()
+        val remainder = parts.drop(1).map { it.text }
+            .filter { it.isNotBlank() && it != main.text }.distinct().joinToString(" / ")
+        val externalTranslation = translationCandidates[time]
+            ?.firstOrNull { it.text.isNotBlank() && it.text != main.text }?.text
+        main.copy(translation = externalTranslation ?: remainder)
+    }
+    return if (lines.isEmpty()) MusicLyrics(plain = content)
+    else MusicLyrics(lines, content)
+}
+
+/** GreenMusic-compatible karaoke policy; estimated timings are never tagged as real. */
+internal fun musicKaraokeWords(
+    lines: List<MusicLyricLine>, index: Int, durationMs: Long, mode: MusicKaraokeMode,
+): List<MusicLyricWord> {
+    if (mode == MusicKaraokeMode.OFF || index !in lines.indices) return emptyList()
+    val line = lines[index]
+    if (line.words.isNotEmpty()) return line.words.mapIndexed { i, word ->
+        word.copy(endMs = word.endMs ?: line.words.getOrNull(i + 1)?.timeMs
+            ?: lines.getOrNull(index + 1)?.timeMs ?: word.timeMs + 750L)
+    }
+    if (mode == MusicKaraokeMode.TIMED ||
+        mode == MusicKaraokeMode.SONG && lines.none { it.words.isNotEmpty() }) return emptyList()
+    val parts = musicLyricGraphemes(line.text)
+    if (parts.isEmpty()) return emptyList()
+    val next = lines.getOrNull(index + 1)?.timeMs
+    var end = next?.coerceAtMost(line.timeMs + 8000L)
+        ?: line.timeMs + (parts.size * 220L).coerceIn(800L, 8000L)
+    if (durationMs > 0) end = minOf(end, durationMs)
+    if (end <= line.timeMs) return emptyList()
+    val span = end - line.timeMs
+    return parts.mapIndexed { i, part ->
+        MusicLyricWord(part, line.timeMs + span * i / parts.size,
+            line.timeMs + span * (i + 1) / parts.size)
+    }
+}
+
+internal fun musicLyricGraphemes(text: String): List<String> {
+    val result = mutableListOf<String>()
+    var start = 0
+    var index = 0
+    var join = false
+    var regional = false
+    while (index < text.length) {
+        val cp = text.codePointAt(index)
+        val type = Character.getType(cp)
+        val mark = type == Character.NON_SPACING_MARK.toInt() ||
+            type == Character.COMBINING_SPACING_MARK.toInt() ||
+            type == Character.ENCLOSING_MARK.toInt() ||
+            cp in 0xFE00..0xFE0F || cp in 0xE0100..0xE01EF || cp in 0x1F3FB..0x1F3FF
+        val isRegional = cp in 0x1F1E6..0x1F1FF
+        if (index > start && !mark && !join && cp != 0x200D && !(isRegional && regional)) {
+            result += text.substring(start, index)
+            start = index
+        }
+        join = cp == 0x200D
+        regional = isRegional && !regional
+        index += Character.charCount(cp)
+    }
+    if (index > start) result += text.substring(start)
+    return result
+}
+
+internal fun currentMusicLyricLine(lyrics: MusicLyrics, position: Long): MusicLyricLine? =
+    lyrics.lines.lastOrNull { it.timeMs <= position }
+
 
 private fun intBE(a: ByteArray, i: Int): Int = if (i < 0 || i + 4 > a.size) -1 else
     ((a[i].toInt() and 255) shl 24) or ((a[i+1].toInt() and 255) shl 16) or
@@ -102,6 +220,7 @@ private fun parseId3(bytes: ByteArray): EmbeddedMusicTags {
     val end = tag.size
     var p = 10
     var title="";var artist="";var album="";var lyrics="";var cover:ByteArray?=null
+    val lyricSources = linkedSetOf<String>()
     while (p+10 <= end) {
         val id = String(tag,p,4,Charsets.US_ASCII)
         if (id.any { !it.isLetterOrDigit() }) break
@@ -116,7 +235,7 @@ private fun parseId3(bytes: ByteArray): EmbeddedMusicTags {
                 val enc=body[0].toInt() and 255
                 val pos=untilTerminator(body,4,enc)
                 val value=fromEncoding(body,pos,enc)
-                if(value.length>lyrics.length)lyrics=value
+                if(value.isNotBlank()) lyricSources += value
             }
             "TXXX" -> if(body.size>=3) {
                 val enc=body[0].toInt() and 255
@@ -124,7 +243,7 @@ private fun parseId3(bytes: ByteArray): EmbeddedMusicTags {
                 val label=runCatching {String(body,1,(pos-1-(if(enc in 1..2)2 else 1)).coerceAtLeast(0),charsetOf(enc)).lowercase()}.getOrDefault("")
                 if(label.contains("lyric")) {
                     val value=fromEncoding(body,pos,enc)
-                    if(value.length>lyrics.length)lyrics=value
+                    if(value.isNotBlank()) lyricSources += value
                 }
             }
             "APIC" -> if(body.size in 15..786432) {
@@ -138,11 +257,12 @@ private fun parseId3(bytes: ByteArray): EmbeddedMusicTags {
         }
         p+=10+n
     }
-    return EmbeddedMusicTags(title,artist,album,lyrics,cover)
+    return EmbeddedMusicTags(title,artist,album,lyricSources.joinToString("\n"),cover)
 }
 private fun parseFlac(bytes: ByteArray): EmbeddedMusicTags {
     var p=4
     var title="";var artist="";var album="";var lyrics="";var cover:ByteArray?=null
+    val lyricSources = linkedSetOf<String>()
     while(p+4<=bytes.size) {
         val flag=bytes[p].toInt() and 255
         val type=flag and 127
@@ -168,7 +288,7 @@ private fun parseFlac(bytes: ByteArray): EmbeddedMusicTags {
                     "TITLE" -> title=value
                     "ARTIST" -> artist=value
                     "ALBUM" -> album=value
-                    "LYRICS","UNSYNCEDLYRICS","SYNCEDLYRICS","LYRIC" -> if(value.length>lyrics.length)lyrics=value
+                    "LYRICS","UNSYNCEDLYRICS","SYNCEDLYRICS","LYRIC" -> if(value.isNotBlank()) lyricSources += value
                 }
             }
         }
@@ -188,7 +308,7 @@ private fun parseFlac(bytes: ByteArray): EmbeddedMusicTags {
         p=end
         if(flag and 128!=0)break
     }
-    return EmbeddedMusicTags(title,artist,album,lyrics,cover)
+    return EmbeddedMusicTags(title,artist,album,lyricSources.joinToString("\n"),cover)
 }
 
 class WebDavMusicMetadata(private val app: AlbumApplication) {
@@ -234,7 +354,12 @@ class WebDavMusicMetadata(private val app: AlbumApplication) {
                 if(out.size()>131072)"" else out.toString(Charsets.UTF_8.name())
             }
         }.getOrDefault("")
-        if(external.isNotBlank())return@withContext parseMusicLyrics(external)
-        parseMusicLyrics((embedded ?: read(track,connection)).lyrics)
+        // A sidecar alone is sufficient. When metadata was already loaded for
+        // playback, merge its translations; do NOT trigger a second audio-range
+        // request just to enrich an otherwise usable external .lrc.
+        val embeddedText = embedded?.lyrics ?: if (external.isBlank())
+            read(track,connection).lyrics else ""
+        if(external.isNotBlank())return@withContext parseMusicLyrics(external, embeddedText)
+        parseMusicLyrics(embeddedText)
     }
 }

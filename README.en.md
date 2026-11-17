@@ -22,7 +22,7 @@ The app uses **Material Design 3** and UI components from my [**LucentUI**](http
 - **Original-resolution viewing:** A centered translucent capsule above the gallery filmstrip can cache or download the full source file with progress. Zooming past roughly 1.6× triggers region-based decoding of visible source pixels instead of stretching a small preview. The capsule follows the existing liquid-glass and haptics settings. Ultra HDR gainmap images conservatively retain the color-correct preview rather than using SDR region tiles.
 - **On-demand image caching:** Load thumbnails and previews without downloading the full remote library.
 
-### Music playback (new in 1.3.2)
+### Music playback
 - **WebDAV audio:** Recognizes MP3, FLAC, M4A, AAC, OGG, OPUS, WAV, and other common extensions. Codec support depends on the device and server; folder tracks form a playback queue.
 - **GreenMusic-inspired player:** Mini-player, album cover, lyrics, queue, gradients, and gestures adapted from the author's [GreenMusic](https://github.com/Chengeeker/GreenMusic) project.
 - **Interruptible transitions:** Tap the mini-player while fullscreen is still collapsing to reverse the shared cover/title animation from its current position. Nonessential fullscreen controls fade out rapidly.
@@ -45,15 +45,23 @@ The app uses **Material Design 3** and UI components from my [**LucentUI**](http
 - **App protection:** Optional PIN/biometric locking and screenshot protection.
 - **Settings backup:** Export/restore non-sensitive preferences. WebDAV credentials are not included in the settings export.
 
+## What's new in 1.5.0
+
+- **New app icon:** a unified watercolor brand mark for launcher aliases, About, and in-app icon preview. Displayed without cropping or distortion.
+- **Compact settings:** less explanatory text, tighter section spacing, and music settings grouped with personalization.
+- **Music player transitions:** capsule-fill expansion/collapse, progressive glass effects, and an inline scrollable queue connected to the mini player.
+- **Playback UX:** smoother album artwork changes, improved swipe-to-dismiss recognition, lyrics and metadata improvements.
+- **Stability:** fixed a Kyant lens shape compatibility crash on player expansion. The package identifier and original release signature are unchanged.
+
 ## Installation
 
 Download a signed APK from [GitHub Releases](https://github.com/Chengeeker/WebAlbum/releases).
 
-**[Download WebAlbum v1.3.2 (arm64-v8a)](https://github.com/Chengeeker/WebAlbum/releases/download/v1.3.2/WebAlbum_v1.3.2_arm64-v8a.apk)**
+**[Download WebAlbum v1.5.0 (arm64-v8a)](https://github.com/Chengeeker/WebAlbum/releases/download/v1.5.0/WebAlbum_v1.5.0_arm64-v8a.apk)**
 
 | Item | Requirement |
 | --- | --- |
-| Current version | **1.3.2** (version code 18) |
+| Current version | **1.5.0** (version code 38) |
 | Android | **8.0 / API 26 or later** |
 | CPU architecture | **arm64-v8a** |
 | Application ID | `com.webdav.album` |
@@ -95,7 +103,7 @@ README.md             Chinese documentation (default)
 
 ## Current status
 
-Version 1.3.2 passes a signed Release build and 103 host-side unit tests (0 failures). Interruptible music transitions, background notifications, Bluetooth controls, and real WebDAV skip latency still require validation on physical devices. M4A-specific embedded lyrics support remains incomplete. Please share issues through [GitHub Issues](https://github.com/Chengeeker/WebAlbum/issues).
+Version 1.3.2 passes a signed Release build and 180 host-side unit tests (0 failures). Interruptible music transitions, background notifications, Bluetooth controls, and real WebDAV skip latency still require validation on physical devices. M4A-specific embedded lyrics support remains incomplete. Please share issues through [GitHub Issues](https://github.com/Chengeeker/WebAlbum/issues).
 
 ## License and credits
 

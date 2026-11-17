@@ -26,9 +26,9 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Text(title, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+    Text(title, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
     SettingsCard(content)
-    Spacer(Modifier.height(16.dp))
+    Spacer(Modifier.height(8.dp))
 }
 @Composable
 fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {

@@ -37,10 +37,13 @@ class WebAlbumMusicPlayback(private val app: AlbumApplication) {
     private val metadata = MutableStateFlow<Map<String, EmbeddedMusicTags>>(emptyMap())
     val discoveredTags = metadata.asStateFlow()
     private val metadataSlots = Semaphore(2)
-    private val pendingTags = mutableSetOf<String>()
+    // Concurrent list rows and player callbacks must await the SAME probe,
+    // rather than treating a second caller as already loaded.
+    private val pendingTags = mutableMapOf<String, CompletableDeferred<Unit>>()
     private var neighborJob: Job? = null
     private var lastNeighborSignature: String? = null
     private var controller: MediaController? = null
+    private var positionJob: Job? = null
     private var connecting: Deferred<MediaController>? = null
     private var connectionScope: String? = null
     private var metadataJob: Job? = null
@@ -79,8 +82,18 @@ class WebAlbumMusicPlayback(private val app: AlbumApplication) {
         if (app.connection != connection) return
         val key = tagKey(track, connection)
         if (metadata.value.containsKey(key)) return
-        val started = synchronized(pendingTags) { pendingTags.add(key) }
-        if (!started) return
+        val (probe, started) = synchronized(pendingTags) {
+            val existing = pendingTags[key]
+            if (existing != null) existing to false else {
+                val created = CompletableDeferred<Unit>()
+                pendingTags[key] = created
+                created to true
+            }
+        }
+        if (!started) {
+            probe.await() // The display row must not reveal raw filenames too early.
+            return
+        }
         try {
             metadataSlots.withPermit {
                 if (app.connection != connection) return@withPermit
@@ -99,7 +112,14 @@ class WebAlbumMusicPlayback(private val app: AlbumApplication) {
                     })
                 }
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            // Artwork/tag probes also run from visible list-row LaunchedEffects.
+            // Optional metadata failures must not become uncaught UI crashes.
+            android.util.Log.w("WebAlbumMusic", "Optional tag probe failed", error)
         } finally {
+            probe.complete(Unit)
             synchronized(pendingTags) { pendingTags.remove(key) }
         }
     }
@@ -128,7 +148,20 @@ class WebAlbumMusicPlayback(private val app: AlbumApplication) {
     fun connect() {
         if (controller != null || connecting != null) return
         val future = MediaController.Builder(app, SessionToken(app,
-            ComponentName(app, WebAlbumMusicService::class.java))).buildAsync()
+            ComponentName(app, WebAlbumMusicService::class.java)))
+            .setListener(object : MediaController.Listener {
+                override fun onDisconnected(player: MediaController) {
+                    if (controller === player) {
+                        controller = null
+                        connecting = null
+                        positionJob?.cancel()
+                        mutable.value = mutable.value.copy(
+                            playing = false, loading = false,
+                            error = "播放服务连接中断，点击播放可重新连接",
+                        )
+                    }
+                }
+            }).buildAsync()
         val ready = CompletableDeferred<MediaController>()
         connecting = ready
         future.addListener({
@@ -137,10 +170,17 @@ class WebAlbumMusicPlayback(private val app: AlbumApplication) {
                 controller = player
                 player.addListener(object : Player.Listener {
                     override fun onEvents(player: Player, events: Player.Events) {
-                        refresh()
-                        if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
-                            updateMetadata()
-                            prefetchAdjacent()
+                        try {
+                            refresh()
+                            if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+                                updateMetadata()
+                                prefetchAdjacent()
+                            }
+                        } catch (error: Exception) {
+                            android.util.Log.e("WebAlbumMusic", "MediaController event failed", error)
+                            mutable.value = mutable.value.copy(
+                                error = "播放状态更新失败：" + (error.localizedMessage ?: "请重试"),
+                            )
                         }
                     }
                     override fun onPlayerError(error: PlaybackException) {
@@ -148,9 +188,31 @@ class WebAlbumMusicPlayback(private val app: AlbumApplication) {
                     }
                 })
                 refresh()
-                scope.launch {
-                    while (isActive) { refreshPosition(); delay(250) }
+                positionJob?.cancel()
+                positionJob = scope.launch {
+                    while (isActive) {
+                        try {
+                            if (controller === player) refreshPosition()
+                            else break
+                        } catch (error: Exception) {
+                            // A stale controller may disconnect between frames:
+                            // this poller must never take down the main process.
+                            android.util.Log.w("WebAlbumMusic",
+                                "Playback position poll failed", error)
+                            if (controller === player) {
+                                controller = null
+                                connecting = null
+                                mutable.value = mutable.value.copy(
+                                    playing = false, loading = false,
+                                    error = "播放服务暂时不可用，请重试",
+                                )
+                            }
+                            break
+                        }
+                        delay(250)
+                    }
                 }
+                connecting = null
                 ready.complete(player)
             } catch (error: Exception) {
                 mutable.value = mutable.value.copy(error = "无法连接播放服务：" + error.message)
@@ -212,7 +274,29 @@ class WebAlbumMusicPlayback(private val app: AlbumApplication) {
         updateMetadata()
         prefetchAdjacent()
     }
-    suspend fun toggle() {
+    /** MediaController can disconnect during foreground/background transitions.
+     * Never let a Media3 command exception escape an onClick coroutine on main. */
+    private suspend fun safeControl(action: String, operation: suspend () -> Unit) {
+        try {
+            operation()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            android.util.Log.e("WebAlbumMusic", "MediaController action failed: $action", error)
+            mutable.value = mutable.value.copy(
+                loading = false,
+                error = "播放控制失败，请重试：" + (error.localizedMessage ?: error.javaClass.simpleName),
+            )
+            // Reconnect on the NEXT action instead of reusing a disconnected
+            // controller. A stale completed Deferred must be cleared as well.
+            positionJob?.cancel()
+            runCatching { controller?.release() }
+            controller = null
+            connecting = null
+        }
+    }
+
+    suspend fun toggle() = safeControl("toggle") {
         val p = ready()
         if (p.playWhenReady) p.pause() else {
             if (p.playbackState == Player.STATE_IDLE) p.prepare()
@@ -221,10 +305,14 @@ class WebAlbumMusicPlayback(private val app: AlbumApplication) {
         }
         refresh()
     }
-    suspend fun pause() { controller?.pause(); refresh() }
+    suspend fun pause() = safeControl("pause") { controller?.pause(); refresh() }
     fun pauseForBackground() { scope.launch { pause() } }
-    suspend fun seek(ms: Long) { val p = ready(); p.seekTo(ms.coerceIn(0L, duration.value.coerceAtLeast(0L))); refreshPosition() }
-    suspend fun next() {
+    suspend fun seek(ms: Long) = safeControl("seek") {
+        val p = ready()
+        p.seekTo(ms.coerceIn(0L, duration.value.coerceAtLeast(0L)))
+        refreshPosition()
+    }
+    suspend fun next() = safeControl("next") {
         val p = ready()
         if (p.mediaItemCount > 0) {
             if (p.hasNextMediaItem()) p.seekToNextMediaItem() else p.seekTo(0, 0L)
@@ -232,7 +320,7 @@ class WebAlbumMusicPlayback(private val app: AlbumApplication) {
             p.play(); refresh(); updateMetadata(); prefetchAdjacent()
         }
     }
-    suspend fun previous() {
+    suspend fun previous() = safeControl("previous") {
         val p = ready()
         if (p.currentPosition > 3000L) p.seekTo(0L) else if (p.mediaItemCount > 0) {
             if (p.hasPreviousMediaItem()) p.seekToPreviousMediaItem() else p.seekTo(p.mediaItemCount - 1, 0L)
@@ -241,7 +329,7 @@ class WebAlbumMusicPlayback(private val app: AlbumApplication) {
         }
         refresh(); updateMetadata(); prefetchAdjacent()
     }
-    suspend fun select(index: Int) {
+    suspend fun select(index: Int) = safeControl("select") {
         val p = ready()
         if (index in 0 until p.mediaItemCount) {
             p.seekTo(index, 0L)
@@ -249,7 +337,7 @@ class WebAlbumMusicPlayback(private val app: AlbumApplication) {
             p.play(); refresh(); updateMetadata(); prefetchAdjacent()
         }
     }
-    suspend fun cycleRepeat() {
+    suspend fun cycleRepeat() = safeControl("repeat") {
         val p = ready()
         p.repeatMode = when (p.repeatMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
@@ -258,9 +346,16 @@ class WebAlbumMusicPlayback(private val app: AlbumApplication) {
         }
         refresh()
     }
-    suspend fun toggleShuffle() { val p = ready(); p.shuffleModeEnabled = !p.shuffleModeEnabled; refresh() }
-    suspend fun speed(value: Float) { ready().setPlaybackSpeed(value.coerceIn(.5f, 2f)); refresh() }
-    suspend fun stop(clear: Boolean = false) {
+    suspend fun toggleShuffle() = safeControl("shuffle") {
+        val p = ready()
+        p.shuffleModeEnabled = !p.shuffleModeEnabled
+        refresh()
+    }
+    suspend fun speed(value: Float) = safeControl("speed") {
+        ready().setPlaybackSpeed(value.coerceIn(.5f, 2f))
+        refresh()
+    }
+    suspend fun stop(clear: Boolean = false) = safeControl("stop") {
         controller?.stop()
         if (clear) {
             controller?.clearMediaItems()
