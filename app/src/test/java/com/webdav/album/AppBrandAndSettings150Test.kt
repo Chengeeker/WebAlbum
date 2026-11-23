@@ -54,11 +54,11 @@ class AppBrandAndSettings150Test {
         assertTrue(primitive.contains("Spacer(Modifier.height(8.dp))"))
     }
 
-    @Test fun releaseVersionMatchesTheRequestedIdentity() {
+    @Test fun releaseVersionMatchesCurrentSource() {
         val path = listOf(File("build.gradle.kts"), File("app/build.gradle.kts")).first {
             it.isFile && it.readText().contains("applicationId = \"com.webdav.album\"")
         }
         val build = path.readText()
-        assertTrue(build.contains("versionCode = 41; versionName = \"1.5.3\""))
+        assertTrue(build.contains("versionCode = 46; versionName = \"1.5.8\""))
     }
 }

@@ -37,7 +37,7 @@ fun reviewHaptic(kind: ReviewHapticKind = ReviewHapticKind.TAP): () -> Unit {
                     ReviewHapticKind.SELECTION -> HapticFeedbackConstants.CLOCK_TICK
                     ReviewHapticKind.LONG_PRESS -> HapticFeedbackConstants.LONG_PRESS
                 }
-                view.performHapticFeedback(constant, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                view.performHapticFeedback(constant)
             }
         }
     }

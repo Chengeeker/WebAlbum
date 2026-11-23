@@ -203,6 +203,7 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
     }
     @Composable fun Content(inDialog: Boolean) {
         val pulse = reviewPulse()
+        val longPressPulse = reviewHaptic(ReviewHapticKind.LONG_PRESS)
         val item = media[pager.currentPage]
         val settledItem = media[pager.settledPage]
         val context = LocalContext.current
@@ -353,7 +354,7 @@ fun ReviewGallery(media: List<GalleryMedia>, start: Int, sources: Map<Int, Galle
                         Box(Modifier.fillMaxSize().transformable(gesture, canPan = { scale > 1f })
                             .pointerInput(page, width, height) { detectTapGestures(onTap = { tap ->
                                 if (tap.x >= width / 3 && tap.x < width * 2 / 3) showControls = !showControls else close()
-                            }, onLongPress = { if (page == pager.currentPage && liveUrl != null) { pulse(); playingMotion = true } },
+                            }, onLongPress = { if (page == pager.currentPage && liveUrl != null) { longPressPulse(); playingMotion = true } },
                             onPress = { try { tryAwaitRelease() } finally { if (page == pager.currentPage && liveUrl != null) playingMotion = false } }, onDoubleTap = { tap ->
                                 pulse()
                                 zoomAnimation?.cancel()
