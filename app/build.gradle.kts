@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id(
 android {
     namespace = "com.webdav.album"
     compileSdk { version = release(37) { minorApiLevel = 2 } }
-    defaultConfig { applicationId = "com.webdav.album"; minSdk = 26; targetSdk = 36; versionCode = 44; versionName = "1.5.6"; ndk { abiFilters += "arm64-v8a" } }
+    defaultConfig { applicationId = "com.webdav.album"; minSdk = 26; targetSdk = 36; versionCode = 46; versionName = "1.5.8"; ndk { abiFilters += "arm64-v8a" } }
     signingConfigs { create("release") { storeFile = file(providers.environmentVariable("WEBALBUM_KEYSTORE").getOrElse("missing.p12")); storePassword = providers.environmentVariable("WEBALBUM_KEY_PASSWORD").orNull; keyAlias = "infinitycm"; keyPassword = providers.environmentVariable("WEBALBUM_KEY_PASSWORD").orNull; storeType = "PKCS12" } }
     buildTypes { release { signingConfig = signingConfigs.getByName("release"); isMinifyEnabled = true; isShrinkResources = true; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
