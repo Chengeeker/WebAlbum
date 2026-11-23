@@ -23,7 +23,9 @@ import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.PageSize
+import androidx.compose.foundation.pager.PagerSnapDistance
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -501,7 +503,9 @@ internal fun GalleryThumbnails(media: List<GalleryMedia>, pager: androidx.compos
     }
     BoxWithConstraints(modifier) {
         val cell = maxWidth * .16f
-        HorizontalPager(thumbnails, overscrollEffect = null, pageSize = PageSize.Fixed(cell),
+        HorizontalPager(thumbnails, overscrollEffect = null,
+            flingBehavior = PagerDefaults.flingBehavior(thumbnails, pagerSnapDistance = PagerSnapDistance.atMost(media.size.coerceAtLeast(1))),
+            pageSize = PageSize.Fixed(cell),
             contentPadding = PaddingValues(horizontal = (maxWidth - cell) / 2),
             modifier = Modifier.height(64.dp)) { index ->
                 val item = media[index]
