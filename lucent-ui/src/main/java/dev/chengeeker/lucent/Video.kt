@@ -14,7 +14,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,7 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.view.ViewCompat
@@ -32,6 +35,7 @@ import dev.chengeeker.lucent.review.reviewPulse
 import dev.chengeeker.lucent.review.HdrBadge
 import dev.chengeeker.lucent.review.isHdrVideoTransfer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onSizeChanged
@@ -46,6 +50,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.ui.PlayerView
 import kotlin.math.abs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class VideoSource(val label: String, val uri: String)
 
@@ -110,15 +115,28 @@ fun LucentVideo(
     var position by remember { mutableLongStateOf(0) }
     var duration by remember { mutableLongStateOf(0) }
     var speed by remember { mutableFloatStateOf(initialSpeed) }
+    var boostLocked by remember { mutableStateOf(false) }
+    var boostHeld by remember { mutableStateOf(false) }
+    var boostGestureHandled by remember { mutableStateOf(false) }
+    var lockOnRelease by remember { mutableStateOf(false) }
+    var unlockOnRelease by remember { mutableStateOf(false) }
+    val latestBoost by rememberUpdatedState(boostHeld)
+    val latestBoostLocked by rememberUpdatedState(boostLocked)
     var fullscreen by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf("") }
     var controls by remember { mutableStateOf(true) }
     var hint by remember { mutableStateOf("") }
+    var speedCue by remember { mutableStateOf("") }
+    var lockCue by remember { mutableStateOf("") }
+    var videoRatio by remember(player) { mutableFloatStateOf(0f) }
     val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val pulse by rememberUpdatedState(reviewPulse())
     val initialBrightness = remember { activity?.window?.attributes?.screenBrightness ?: -1f }
     LaunchedEffect(valid) {
+        boostHeld = false
+        boostLocked = false
+        hint = ""
         quality = quality.coerceIn(valid.indices)
         hdrVideo = false
         player.setMediaItem(MediaItem.fromUri(valid[quality].uri))
@@ -139,7 +157,10 @@ fun LucentVideo(
         val listener =
             object : Player.Listener {
                 override fun onTracksChanged(tracks: Tracks) { updateHdrMetadata() }
-                override fun onVideoSizeChanged(videoSize: VideoSize) { updateHdrMetadata() }
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    videoRatio = if (videoSize.height > 0) videoSize.width * videoSize.pixelWidthHeightRatio / videoSize.height else 0f
+                    updateHdrMetadata()
+                }
 
                 override fun onIsPlayingChanged(value: Boolean) {
                     playing = value
@@ -194,10 +215,12 @@ fun LucentVideo(
     }
     LaunchedEffect(hint) {
         if (hint.isNotBlank()) {
-            delay(1300)
+            delay(if (hint.startsWith("2×") || hint.startsWith("松开") || hint == "已恢复原速") 900 else 1300)
             hint = ""
         }
     }
+    LaunchedEffect(speedCue) { if (speedCue.isNotBlank()) { delay(900); speedCue = "" } }
+    LaunchedEffect(lockCue) { if (lockCue.isNotBlank()) { delay(900); lockCue = "" } }
     DisposableEffect(activity, fullscreen) {
         val window = activity?.window
         if (!fullscreen || window == null) {
@@ -254,6 +277,43 @@ fun LucentVideo(
         Box(
             Modifier.fillMaxSize()
                 .pointerInput(player, speed) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        boostGestureHandled = false
+                        val movedBeforeHold = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: return@withTimeoutOrNull true
+                                if (!change.pressed || (change.position - down.position).getDistance() > viewConfiguration.touchSlop) return@withTimeoutOrNull true
+                            }
+                            false
+                        }
+                        if (movedBeforeHold != null) return@awaitEachGesture
+                        boostGestureHandled = true
+                        val lockedAtStart = latestBoostLocked
+                        boostHeld = true; lockOnRelease = false; unlockOnRelease = false
+                        player.setPlaybackSpeed(2f)
+                        speedCue = if (lockedAtStart) "2× 倍速已锁定" else "2× 临时倍速"; lockCue = ""; hint = ""
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                val offset = change.position.y - down.position.y
+                                lockOnRelease = !lockedAtStart && offset >= 48.dp.toPx()
+                                unlockOnRelease = lockedAtStart && offset <= -48.dp.toPx()
+                                lockCue = when { lockOnRelease -> "松开锁定倍速"; unlockOnRelease -> "松开恢复原速"; else -> "" }
+                                change.consume()
+                            }
+                        } finally {
+                            boostLocked = if (unlockOnRelease) false else lockOnRelease || lockedAtStart
+                            boostHeld = false
+                            player.setPlaybackSpeed(if (boostLocked) 2f else speed)
+                            speedCue = ""; lockCue = when { lockOnRelease -> "2× 倍速已锁定"; unlockOnRelease -> "已恢复原速"; else -> "" }
+                        }
+                    }
+                }
+                .pointerInput(player, speed) {
                     // Compose detectTapGestures(onDoubleTap=...) defers the SINGLE-tap
                     // callback until the double-tap timeout. Respond on the first tap
                     // instead, then undo its visibility toggle on the second tap.
@@ -263,6 +323,7 @@ fun LucentVideo(
                     val doubleTapSlop = ViewConfiguration.get(context).scaledDoubleTapSlop.toFloat()
                     detectTapGestures(
                         onTap = { point ->
+                            if (boostGestureHandled) return@detectTapGestures
                             val now = SystemClock.uptimeMillis()
                             val isDoubleTap = lastTapTime > 0L &&
                                 now - lastTapTime <= doubleTapTimeout &&
@@ -278,18 +339,6 @@ fun LucentVideo(
                             } else {
                                 lastTapTime = now
                                 lastTapPosition = point
-                            }
-                        },
-                        onLongPress = {
-                            pulse()
-                            player.setPlaybackSpeed(2f)
-                            hint = "2× 临时倍速"
-                        },
-                        onPress = {
-                            try {
-                                tryAwaitRelease()
-                            } finally {
-                                player.setPlaybackSpeed(speed)
                             }
                         },
                     )
@@ -321,12 +370,26 @@ fun LucentVideo(
                                         .toLong()
                                         .coerceIn(0, player.duration.coerceAtLeast(0))
                                 )
+                            if (latestBoost) {
+                                if (lockOnRelease) boostLocked = true
+                                if (unlockOnRelease) boostLocked = false
+                                player.setPlaybackSpeed(if (boostLocked) 2f else speed)
+                                speedCue = ""; lockCue = when { lockOnRelease -> "2× 倍速已锁定"; unlockOnRelease -> "已恢复原速"; else -> "" }
+                                boostHeld = false
+                            }
                         },
                         onDrag = { change, delta ->
                             change.consume()
                             totalX += delta.x
                             totalY += delta.y
                             if (direction == 0) direction = if (abs(totalX) > abs(totalY)) 1 else 2
+                            if (latestBoost) {
+                                val threshold = 48.dp.toPx()
+                                lockOnRelease = !latestBoostLocked && totalY >= threshold
+                                unlockOnRelease = latestBoostLocked && totalY <= -threshold
+                                lockCue = when { lockOnRelease -> "松开锁定倍速"; unlockOnRelease -> "松开恢复原速"; else -> "" }
+                                return@detectDragGestures
+                            }
                             if (direction == 1)
                                 hint =
                                     "定位 ${((start+totalX/size.width*60_000).coerceAtLeast(0f)/1000).toInt()} 秒"
@@ -373,14 +436,23 @@ fun LucentVideo(
                 description = "HDR 视频",
             )
         }
-        if (hint.isNotBlank())
-            Text(
-                hint,
-                Modifier.align(Alignment.Center)
-                    .background(Color.Black.copy(alpha = .7f))
-                    .padding(12.dp),
-                color = Color.White,
-            )
+        if (hint.isNotBlank()) {
+            val topSpace = if (videoRatio > 0f) ((maxHeight - maxWidth / videoRatio) / 2).coerceAtLeast(0.dp) else 0.dp
+            Box(
+                if (topSpace >= 144.dp) Modifier.align(Alignment.TopCenter).height(topSpace).padding(top = 56.dp)
+                else Modifier.align(androidx.compose.ui.BiasAlignment(0f, -.5f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(hint, Modifier.background(Color.Black.copy(alpha = .87f), RoundedCornerShape(10.dp)).padding(horizontal = 16.dp, vertical = 10.dp), color = Color.White, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+            }
+        }
+        val holdHint = lockCue.ifBlank { speedCue }
+        if (holdHint.isNotBlank()) {
+            val topSpace = if (videoRatio > 0f) ((maxHeight - maxWidth / videoRatio) / 2).coerceAtLeast(0.dp) else 0.dp
+            Box(if (topSpace >= 144.dp) Modifier.align(Alignment.TopCenter).height(topSpace).padding(top = 56.dp) else Modifier.align(androidx.compose.ui.BiasAlignment(0f, -.5f)), contentAlignment = Alignment.Center) {
+                Text(holdHint, Modifier.background(Color.Black.copy(alpha = .87f), RoundedCornerShape(10.dp)).padding(horizontal = 16.dp, vertical = 10.dp), color = Color.White, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+            }
+        }
         if (showChrome)
             LucentVideoBottom(
                 Modifier.align(Alignment.BottomCenter).onSizeChanged { onControlsHeight(it.height) },
